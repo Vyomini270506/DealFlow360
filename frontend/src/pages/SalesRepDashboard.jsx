@@ -87,6 +87,28 @@ const SalesRepDashboard = () => {
     }
   };
 
+  const handleRepActionOnRequest = async (requestId, action) => {
+    try {
+      const { data } = await API.post(`/customer-requests/${requestId}/rep-action`, { action });
+      if (action === 'APPROVE') toast.success('Product Request approved! You can now generate a quotation.');
+      else if (action === 'REJECT') toast.info('Product Request rejected.');
+      else toast.info('Product Request sent to Sales Manager for approval!');
+      fetchDashboardData();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to process request action');
+    }
+  };
+
+  const handleSubmitForApproval = async (quoteId) => {
+    try {
+      await API.post(`/quotations/${quoteId}/submit`);
+      toast.success('Customer Request & Quotation sent to Sales Manager for approval!');
+      fetchDashboardData();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to submit for manager approval');
+    }
+  };
+
   const handleAcceptNegotiationDirectly = async (quotationId) => {
     try {
       await API.post(`/negotiations/quotation/${quotationId}/accept`);
@@ -357,20 +379,124 @@ const SalesRepDashboard = () => {
                             onClick={() => setSelectedRequestModal(reqItem)}
                             className="px-3 py-1.5 rounded-xl bg-muted border border-border text-foreground hover:bg-card font-bold text-xs inline-flex items-center gap-1 transition"
                           >
-                            <Eye className="w-3.5 h-3.5 text-primary" /> View Request
+                            <Eye className="w-3.5 h-3.5 text-primary" /> View Details
                           </button>
 
-                          {isQuoted ? (
-                            <span className="text-[11px] font-bold text-success inline-flex items-center gap-1">
-                              ✓ Quotation Sent
+                          {/* QUOTED */}
+                          {reqItem.status === 'Quoted' && (
+                            <span className="text-[11px] font-bold text-emerald-500 inline-flex items-center gap-1 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/30">
+                              ✓ Quotation Generated & Sent
                             </span>
-                          ) : (
-                            <button
-                              onClick={() => handleCreateQuotationFromRequest(reqItem._id)}
-                              className="px-3 py-1.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
-                            >
-                              <Send className="w-3.5 h-3.5" /> Create Quotation
-                            </button>
+                          )}
+
+                          {/* MANAGER APPROVED */}
+                          {reqItem.status === 'Approved_Manager' && (
+                            <div className="inline-flex items-center gap-2">
+                              <span className="text-[10px] font-extrabold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/30">
+                                MANAGER APPROVED ✓
+                              </span>
+                              <button
+                                onClick={() => handleCreateQuotationFromRequest(reqItem._id)}
+                                className="px-3 py-1.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                              >
+                                <Send className="w-3.5 h-3.5" /> Create Quotation
+                              </button>
+                            </div>
+                          )}
+
+                          {/* MANAGER REJECTED */}
+                          {reqItem.status === 'Rejected_Manager' && (
+                            <div className="inline-flex items-center gap-2">
+                              <span className="text-[10px] font-extrabold text-rose-500 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/30">
+                                MANAGER REJECTED ✗
+                              </span>
+                              {reqItem.managerComment && (
+                                <span className="text-[10px] text-muted-foreground italic">"{reqItem.managerComment}"</span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* NEGOTIATION REQUIRED / CHANGES REQUESTED BY MANAGER */}
+                          {reqItem.status === 'Negotiation_Required' && (
+                            <div className="inline-flex flex-col items-end gap-1">
+                              <span className="text-[10px] font-extrabold text-amber-500 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/30">
+                                NEGOTIATION REQUIRED 💬
+                              </span>
+                              {reqItem.managerComment && (
+                                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium italic">Manager: "{reqItem.managerComment}"</span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* ESCALATED / WAITING FOR SALES MANAGER */}
+                          {reqItem.status === 'Escalated_Manager' && (
+                            <span className="text-[11px] font-bold text-amber-500 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/30 inline-flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" /> WAITING FOR SALES MANAGER
+                            </span>
+                          )}
+
+                          {/* APPROVED BY REP */}
+                          {reqItem.status === 'Approved_Rep' && (
+                            <div className="inline-flex items-center gap-2">
+                              <span className="text-[10px] font-extrabold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/30">
+                                Approved by Rep ✓
+                              </span>
+                              <button
+                                onClick={() => handleCreateQuotationFromRequest(reqItem._id)}
+                                className="px-3 py-1.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                              >
+                                <Send className="w-3.5 h-3.5" /> Create Quotation
+                              </button>
+                            </div>
+                          )}
+
+                          {/* REJECTED BY REP */}
+                          {reqItem.status === 'Rejected_Rep' && (
+                            <span className="text-[10px] font-extrabold text-rose-500 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/30">
+                              Rejected by Rep ✗
+                            </span>
+                          )}
+
+                          {/* INITIAL PENDING / SUBMITTED STATE */}
+                          {(reqItem.status === 'Pending' || reqItem.status === 'Submitted' || reqItem.status === 'Processing') && (
+                            <>
+                              {/* LOW RISK OPTIONS */}
+                              {reqItem.riskLevel === 'LOW' && (
+                                <div className="inline-flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => handleRepActionOnRequest(reqItem._id, 'APPROVE')}
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition inline-flex items-center gap-1"
+                                  >
+                                    <CheckCircle className="w-3 h-3" /> Approve
+                                  </button>
+                                  <button
+                                    onClick={() => handleRepActionOnRequest(reqItem._id, 'REJECT')}
+                                    className="px-2.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow-sm transition inline-flex items-center gap-1"
+                                  >
+                                    <XCircle className="w-3 h-3" /> Reject
+                                  </button>
+                                  <button
+                                    onClick={() => handleRepActionOnRequest(reqItem._id, 'SEND_TO_MANAGER')}
+                                    className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-sm transition inline-flex items-center gap-1"
+                                  >
+                                    <ArrowRight className="w-3 h-3" /> Send to Manager
+                                  </button>
+                                </div>
+                              )}
+
+                              {/* MEDIUM / HIGH RISK COMPULSORY MANAGER APPROVAL */}
+                              {(reqItem.riskLevel === 'MEDIUM' || reqItem.riskLevel === 'HIGH') && (
+                                <div className="inline-flex flex-col items-end gap-1">
+                                  <span className="text-[9px] text-rose-500 font-bold">Manager approval required before quotation</span>
+                                  <button
+                                    onClick={() => handleRepActionOnRequest(reqItem._id, 'SEND_TO_MANAGER')}
+                                    className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                                  >
+                                    <ArrowRight className="w-3.5 h-3.5" /> SEND TO SALES MANAGER
+                                  </button>
+                                </div>
+                              )}
+                            </>
                           )}
                         </td>
                       </tr>
@@ -444,12 +570,64 @@ const SalesRepDashboard = () => {
                         </button>
 
                         {q.status === 'Draft' && (
-                          <button
-                            onClick={() => handleSendQuotation(q._id)}
-                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
-                          >
-                            <Send className="w-3.5 h-3.5" /> Send to Customer
-                          </button>
+                          <>
+                            {/* LOW RISK: Sales Rep can proceed directly OR optionally send to Manager */}
+                            {q.riskLevel === 'LOW' && (
+                              <>
+                                <button
+                                  onClick={() => handleSendQuotation(q._id)}
+                                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                                >
+                                  <Send className="w-3.5 h-3.5" /> PROCEED (Send to Customer)
+                                </button>
+                                <button
+                                  onClick={() => handleSubmitForApproval(q._id)}
+                                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                                >
+                                  <ArrowRight className="w-3.5 h-3.5" /> SEND TO SALES MANAGER
+                                </button>
+                              </>
+                            )}
+
+                            {/* MEDIUM / HIGH RISK: Sales Manager Approval is COMPULSORY */}
+                            {(q.riskLevel === 'MEDIUM' || q.riskLevel === 'HIGH') && (
+                              <button
+                                onClick={() => handleSubmitForApproval(q._id)}
+                                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                              >
+                                <ArrowRight className="w-3.5 h-3.5" /> SEND TO SALES MANAGER (Required)
+                              </button>
+                            )}
+                          </>
+                        )}
+
+                        {q.status === 'Approved' && (
+                          <div className="inline-flex items-center gap-2">
+                            <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
+                              Manager Approved ✓
+                            </span>
+                            <button
+                              onClick={() => handleSendQuotation(q._id)}
+                              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                            >
+                              <Send className="w-3.5 h-3.5" /> SEND TO CUSTOMER
+                            </button>
+                          </div>
+                        )}
+
+                        {q.status === 'Rejected' && (
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/30">
+                            Manager Rejected ✗
+                          </span>
+                        )}
+
+                        {q.status === 'Pending Approval' && (
+                          <div className="inline-flex flex-col items-end">
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                              Pending Sales Manager Approval
+                            </span>
+                            <span className="text-[9px] text-muted-foreground mt-0.5">Manager approval required before customer send</span>
+                          </div>
                         )}
 
                         <button

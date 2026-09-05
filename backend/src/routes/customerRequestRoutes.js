@@ -4,6 +4,7 @@ const {
   createCustomerRequest,
   getCustomerRequests,
   getCustomerRequestById,
+  repActionOnRequest,
   escalateToManager,
   managerAction,
   createQuotationFromRequest
@@ -15,6 +16,7 @@ router.route('/')
   .get(protect, getCustomerRequests);
 
 router.get('/:id', protect, getCustomerRequestById);
+router.post('/:id/rep-action', protect, authorizeRoles('SALES_REP'), repActionOnRequest);
 router.post('/:id/escalate', protect, authorizeRoles('SALES_REP'), escalateToManager);
 router.post('/:id/manager-action', protect, authorizeRoles('SALES_MANAGER', 'ADMIN'), managerAction);
 router.post('/:id/create-quotation', protect, authorizeRoles('SALES_REP'), createQuotationFromRequest);

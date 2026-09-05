@@ -13,23 +13,24 @@ const auditSchema = new mongoose.Schema({
 });
 
 const approvalSchema = new mongoose.Schema({
-  quotation: { type: mongoose.Schema.Types.ObjectId, ref: 'Quotation', required: true },
+  quotation: { type: mongoose.Schema.Types.ObjectId, ref: 'Quotation', default: null },
   customerRequest: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerRequest', default: null },
   negotiation: { type: mongoose.Schema.Types.ObjectId, ref: 'Negotiation', default: null },
   customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
   salesRep: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  salesManager: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   requestedDiscount: { type: Number, default: 0 },
   allowedDiscount: { type: Number, default: 0 },
   currentStep: { 
     type: String, 
-    enum: ['SALES_MANAGER', 'FINANCE_OPERATIONS', 'COMPLETED', 'REJECTED'], 
+    enum: ['SALES_MANAGER', 'FINANCE_OPERATIONS', 'COMPLETED', 'REJECTED', 'NEGOTIATION_REQUIRED'], 
     required: true 
   },
   riskScore: { type: Number, required: true },
   riskLevel: { type: String, required: true },
   riskReasons: [{ type: String }],
   managerApproval: {
-    status: { type: String, enum: ['PENDING', 'APPROVED', 'REJECTED'], default: 'PENDING' },
+    status: { type: String, enum: ['PENDING', 'APPROVED', 'REJECTED', 'NEGOTIATION_REQUIRED'], default: 'PENDING' },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     comment: { type: String, default: '' },
     actionDate: { type: Date }

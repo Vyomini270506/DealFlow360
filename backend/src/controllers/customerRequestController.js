@@ -196,6 +196,52 @@ const getCustomerRequestById = async (req, res) => {
   }
 };
 
+// @desc Sales Representative directly approves or rejects a LOW risk customer request
+// @route POST /api/customer-requests/:id/rep-action
+const repActionOnRequest = async (req, res) => {
+  try {
+    const { action } = req.body; // action: 'APPROVE' | 'REJECT' | 'SEND_TO_MANAGER'
+    const request = await CustomerRequest.findById(req.params.id);
+
+    if (!request) {
+      return res.status(404).json({ message: 'Customer request not found' });
+    }
+
+    if (req.user.role === 'SALES_REP' && request.assignedSalesRep.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized to act on this request' });
+    }
+
+    // STRICT BACKEND ENFORCEMENT: MEDIUM & HIGH risk requests CANNOT be independently decided by Sales Rep
+    if (request.riskLevel === 'MEDIUM' || request.riskLevel === 'HIGH') {
+      if (action === 'APPROVE' || action === 'REJECT') {
+        return res.status(403).json({
+          message: `Sales Representative cannot independently decide on ${request.riskLevel} risk requests. Sales Manager approval is compulsory.`
+        });
+      }
+    }
+
+    if (action === 'APPROVE') {
+      request.status = 'Approved_Rep';
+      await request.save();
+      return res.json({ message: 'Product request approved by Sales Representative', request });
+    }
+
+    if (action === 'REJECT') {
+      request.status = 'Rejected_Rep';
+      await request.save();
+      return res.json({ message: 'Product request rejected by Sales Representative', request });
+    }
+
+    if (action === 'SEND_TO_MANAGER') {
+      return escalateToManager(req, res);
+    }
+
+    res.status(400).json({ message: 'Invalid action specified' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // @desc Sales Representative escalates Medium/High risk request to Sales Manager
 // @route POST /api/customer-requests/:id/escalate
 const escalateToManager = async (req, res) => {
@@ -211,43 +257,139 @@ const escalateToManager = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to escalate this request' });
     }
 
+    const repUser = await User.findById(req.user._id);
+    const assignedManagerId = repUser?.salesManagerId || request.customer?.assignedSalesManager || null;
+
     request.status = 'Escalated_Manager';
     request.escalationReason = escalationReason || `Escalated for manager signoff due to ${request.riskLevel} risk score.`;
     await request.save();
 
-    res.json({ message: 'Request escalated to Sales Manager successfully', request });
+    // Calculate max requested discount for Approval record
+    let maxRequestedDisc = 0;
+    if (request.items && Array.isArray(request.items)) {
+      request.items.forEach(i => {
+        if (i.desiredDiscountPercent > maxRequestedDisc) maxRequestedDisc = i.desiredDiscountPercent;
+      });
+    }
+
+    // Create or update Approval document referencing customerRequest
+    let approval = await Approval.findOne({ customerRequest: request._id });
+    if (!approval) {
+      approval = new Approval({
+        customerRequest: request._id,
+        customer: request.customer._id || request.customer,
+        salesRep: req.user._id,
+        salesManager: assignedManagerId,
+        requestedDiscount: maxRequestedDisc,
+        allowedDiscount: 10,
+        currentStep: 'SALES_MANAGER',
+        riskScore: request.riskScore,
+        riskLevel: request.riskLevel,
+        riskReasons: request.riskReasons,
+        managerApproval: { status: 'PENDING' },
+        auditTrail: [{
+          user: req.user._id,
+          action: 'SUBMITTED',
+          role: req.user.role,
+          reason: escalationReason || `Customer Request submitted for Sales Manager approval due to ${request.riskLevel} risk`
+        }]
+      });
+    } else {
+      approval.salesManager = assignedManagerId;
+      approval.currentStep = 'SALES_MANAGER';
+      approval.managerApproval.status = 'PENDING';
+      approval.auditTrail.push({
+        user: req.user._id,
+        action: 'SUBMITTED',
+        role: req.user.role,
+        reason: escalationReason || `Customer Request re-submitted for Sales Manager approval`
+      });
+    }
+    await approval.save();
+
+    res.json({ message: 'Request sent to Sales Manager for approval successfully', request, approval });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Sales Manager approves or rejects an escalated request
+// @desc Sales Manager approves, rejects, or requests negotiation/changes on a request
 // @route POST /api/customer-requests/:id/manager-action
 const managerAction = async (req, res) => {
   try {
-    const { action, comment } = req.body; // action = 'APPROVE' | 'REJECT'
+    const { action, comment } = req.body; // action = 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES' | 'NEGOTIATE'
     const request = await CustomerRequest.findById(req.params.id);
 
     if (!request) {
       return res.status(404).json({ message: 'Customer request not found' });
     }
 
+    let approval = await Approval.findOne({ customerRequest: request._id });
+
     if (action === 'APPROVE') {
       request.status = 'Approved_Manager';
       request.managerComment = comment || 'Approved by Sales Manager.';
-    } else {
+
+      if (approval) {
+        approval.managerApproval.status = 'APPROVED';
+        approval.managerApproval.approvedBy = req.user._id;
+        approval.managerApproval.comment = comment || 'Approved by Sales Manager';
+        approval.managerApproval.actionDate = new Date();
+        approval.currentStep = 'COMPLETED';
+        approval.auditTrail.push({
+          user: req.user._id,
+          action: 'APPROVED_BY_MANAGER',
+          role: req.user.role,
+          reason: comment || 'Manager approved customer request'
+        });
+        await approval.save();
+      }
+    } else if (action === 'REJECT') {
       request.status = 'Rejected_Manager';
       request.managerComment = comment || 'Rejected by Sales Manager.';
+
+      if (approval) {
+        approval.managerApproval.status = 'REJECTED';
+        approval.managerApproval.approvedBy = req.user._id;
+        approval.managerApproval.comment = comment || 'Rejected by Sales Manager';
+        approval.managerApproval.actionDate = new Date();
+        approval.currentStep = 'REJECTED';
+        approval.auditTrail.push({
+          user: req.user._id,
+          action: 'REJECTED',
+          role: req.user.role,
+          reason: comment || 'Manager rejected customer request'
+        });
+        await approval.save();
+      }
+    } else if (action === 'REQUEST_CHANGES' || action === 'NEGOTIATE') {
+      request.status = 'Negotiation_Required';
+      request.managerComment = comment || 'Sales Manager requested negotiation/changes.';
+
+      if (approval) {
+        approval.managerApproval.status = 'NEGOTIATION_REQUIRED';
+        approval.managerApproval.approvedBy = req.user._id;
+        approval.managerApproval.comment = comment || 'Manager requested negotiation';
+        approval.managerApproval.actionDate = new Date();
+        approval.currentStep = 'NEGOTIATION_REQUIRED';
+        approval.auditTrail.push({
+          user: req.user._id,
+          action: 'RETURNED_FOR_CHANGES',
+          role: req.user.role,
+          reason: comment || 'Manager requested negotiation with customer'
+        });
+        await approval.save();
+      }
     }
 
     await request.save();
-    res.json({ message: `Request ${action === 'APPROVE' ? 'approved' : 'rejected'} by Sales Manager`, request });
+    res.json({ message: `Request manager decision '${action}' saved successfully`, request, approval });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Sales Representative creates official Quotation from Customer Product Request
+// @desc Sales Representative creates official Quotation from Customer Product Request (Requires Manager Approval for Medium/High Risk)
 // @route POST /api/customer-requests/:id/create-quotation
 const createQuotationFromRequest = async (req, res) => {
   try {
@@ -257,6 +399,23 @@ const createQuotationFromRequest = async (req, res) => {
 
     if (!request) {
       return res.status(404).json({ message: 'Customer request not found' });
+    }
+
+    if (req.user.role === 'SALES_REP' && request.assignedSalesRep.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized to manage this request' });
+    }
+
+    // STRICT PREREQUISITE RULE: For MEDIUM and HIGH risk requests, Sales Manager approval MUST be obtained BEFORE quotation creation
+    if (request.riskLevel === 'MEDIUM' || request.riskLevel === 'HIGH') {
+      if (request.status !== 'Approved_Manager') {
+        return res.status(403).json({
+          message: `Quotation generation is blocked. Sales Manager approval is required for ${request.riskLevel} risk requests before a quotation can be created.`
+        });
+      }
+    } else if (request.riskLevel === 'LOW') {
+      if (request.status === 'Rejected_Rep' || request.status === 'Rejected_Manager') {
+        return res.status(400).json({ message: 'Cannot generate quotation for a rejected request.' });
+      }
     }
 
     const { items, notes } = req.body;
@@ -309,25 +468,36 @@ const createQuotationFromRequest = async (req, res) => {
     const count = await Quotation.countDocuments();
     const quoteNumber = `Q-${1000 + count + 1}`;
 
+    const salesRepUser = await User.findById(req.user._id);
+    const assignedManagerId = salesRepUser?.salesManagerId || null;
+
     const quotation = new Quotation({
       quoteNumber,
       customer: request.customer._id,
       customerRequest: request._id,
       salesRep: req.user._id,
+      assignedSalesManager: assignedManagerId,
       items: formattedItems,
       subtotal: Number(subtotal.toFixed(2)),
       totalDiscount: Number(totalDiscount.toFixed(2)),
       tax,
       grandTotal,
-      status: 'Approved',
+      status: 'Draft',
       riskScore: riskAnalysis.score,
       riskLevel: riskAnalysis.level,
       riskReasons: riskAnalysis.reasons,
-      approvalChainState: 'APPROVED',
+      approvalChainState: request.status === 'Approved_Manager' ? 'APPROVED' : 'NONE',
       notes: notes || `Created from Product Request ${request.requestNumber}`
     });
 
     await quotation.save();
+
+    // Link quotation to Approval document if it exists
+    let approval = await Approval.findOne({ customerRequest: request._id });
+    if (approval) {
+      approval.quotation = quotation._id;
+      await approval.save();
+    }
 
     request.status = 'Quoted';
     request.quotation = quotation._id;
@@ -343,6 +513,7 @@ module.exports = {
   createCustomerRequest,
   getCustomerRequests,
   getCustomerRequestById,
+  repActionOnRequest,
   escalateToManager,
   managerAction,
   createQuotationFromRequest

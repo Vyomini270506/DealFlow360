@@ -96,14 +96,19 @@ const SalesManagerDashboard = () => {
     }
   };
 
-  const handleManagerRequestAction = async (requestId, action) => {
+  const handleManagerRequestAction = async (requestId, action, customComment) => {
+    let comment = customComment;
+    if (!comment && action === 'REQUEST_CHANGES') {
+      comment = window.prompt('Enter negotiation instructions for Sales Representative (e.g., Discount too high, negotiate max 10%):');
+      if (comment === null) return;
+    }
     try {
       await API.post(`/customer-requests/${requestId}/manager-action`, {
         action,
-        comment: action === 'APPROVE' ? 'Approved by Sales Manager' : 'Rejected by Sales Manager'
+        comment: comment || (action === 'APPROVE' ? 'Approved by Sales Manager' : 'Rejected by Sales Manager')
       });
 
-      toast.success(`Product Request ${action === 'APPROVE' ? 'Approved' : 'Rejected'} successfully!`);
+      toast.success(`Manager decision '${action}' recorded successfully!`);
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Manager action failed');
@@ -184,9 +189,15 @@ const SalesManagerDashboard = () => {
                     <td className="p-3 text-right space-x-2">
                       <button
                         onClick={() => handleManagerRequestAction(reqItem._id, 'APPROVE')}
-                        className="px-3 py-1.5 rounded-lg bg-success hover:bg-emerald-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
                       >
                         <ShieldCheck className="w-3.5 h-3.5" /> Approve
+                      </button>
+                      <button
+                        onClick={() => handleManagerRequestAction(reqItem._id, 'REQUEST_CHANGES')}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" /> Request Changes
                       </button>
                       <button
                         onClick={() => handleManagerRequestAction(reqItem._id, 'REJECT')}

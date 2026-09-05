@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import API from '../services/api';
 import { toast } from 'sonner';
-import { X, CheckCircle, XCircle, RotateCcw, ShieldAlert, History } from 'lucide-react';
-import { RiskBadge, StatusBadge } from './StatusBadge';
+import { X, CheckCircle, XCircle, RotateCcw, ShieldAlert, History, MessageSquare, ShoppingCart, FileText } from 'lucide-react';
+import { RiskBadge } from './StatusBadge';
 
 const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
   const [reason, setReason] = useState('');
@@ -11,6 +11,8 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
   if (!isOpen || !approval) return null;
 
   const quote = approval.quotation;
+  const custReq = approval.customerRequest;
+  const customer = approval.customer || quote?.customer || custReq?.customer;
 
   const handleAction = async (actionType) => {
     if (!reason && actionType !== 'APPROVE') {
@@ -36,18 +38,18 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 text-foreground">
         
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-border flex items-center justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <h2 className="text-lg font-bold text-white">Approval Request: {quote?.quoteNumber}</h2>
+              <h2 className="text-lg font-extrabold text-foreground">Approval Review: {quote?.quoteNumber || 'Quotation Approval'}</h2>
               <RiskBadge level={approval.riskLevel} score={approval.riskScore} />
             </div>
-            <p className="text-xs text-slate-400">Review quotation items, risk factor breakdowns, and audit trail</p>
+            <p className="text-xs text-muted-foreground">Compare original Customer Product Request against official Sales Quotation</p>
           </div>
-          <button onClick={onClose} className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
+          <button onClick={onClose} className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -55,106 +57,177 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
         {/* Content */}
         <div className="p-6 space-y-6 overflow-y-auto flex-1">
           
-          {/* Customer & Rep Card */}
-          <div className="grid grid-cols-2 gap-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+          {/* Customer & Rep Overview Banner */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-muted/40 p-4 rounded-xl border border-border">
             <div>
-              <p className="text-[10px] uppercase font-bold text-slate-500">Customer Account</p>
-              <p className="text-sm font-bold text-slate-200">{quote?.customer?.company}</p>
-              <p className="text-xs text-slate-400">{quote?.customer?.name} — <span className="text-amber-400 font-semibold">{quote?.customer?.tier} Tier</span></p>
+              <p className="text-[10px] uppercase font-bold text-muted-foreground">Customer Account</p>
+              <p className="text-sm font-extrabold text-foreground">{customer?.company || customer?.name || 'Customer'}</p>
+              <p className="text-xs text-muted-foreground">{customer?.email} — <span className="text-amber-500 font-bold">{customer?.tier || 'Gold'} Tier</span></p>
             </div>
             <div>
-              <p className="text-[10px] uppercase font-bold text-slate-500">Sales Representative</p>
-              <p className="text-sm font-bold text-slate-200">{approval.salesRep?.name}</p>
-              <p className="text-xs text-indigo-400 font-bold mt-0.5">Total Deal Value: ₹{quote?.grandTotal?.toLocaleString()}</p>
+              <p className="text-[10px] uppercase font-bold text-muted-foreground">Assigned Sales Representative</p>
+              <p className="text-sm font-extrabold text-foreground">{approval.salesRep?.name}</p>
+              <p className="text-xs text-primary font-extrabold mt-0.5">Total Deal Value: ₹{quote?.grandTotal?.toLocaleString()}</p>
             </div>
           </div>
 
-          {/* Transparent Risk Reasons Breakdown */}
-          <div className="bg-rose-950/30 border border-rose-800/40 p-4 rounded-xl space-y-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-rose-400">
-              <ShieldAlert className="w-4 h-4" />
-              Risk Analysis Factors (Score: {approval.riskScore}/100)
+          {/* SIDE BY SIDE COMPARISON: CUSTOMER REQUEST vs QUOTATION */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            {/* SIDE 1: CUSTOMER REQUEST */}
+            <div className="p-4 rounded-xl bg-card border border-border space-y-3 shadow-sm">
+              <div className="flex items-center justify-between border-b border-border pb-2">
+                <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <ShoppingCart className="w-4 h-4 text-amber-500" />
+                  Original Customer Request
+                </h3>
+                <span className="text-[10px] font-bold text-primary px-2 py-0.5 rounded-full bg-primary/10 border border-primary/30">
+                  {custReq?.requestNumber || 'PR-Direct'}
+                </span>
+              </div>
+
+              {custReq?.message && (
+                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-600 dark:text-amber-400">
+                  <span className="font-bold flex items-center gap-1">
+                    <MessageSquare className="w-3.5 h-3.5" /> Customer Note:
+                  </span>
+                  <p className="mt-0.5 italic">"{custReq.message}"</p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-bold text-muted-foreground uppercase">Requested Items & Discounts</p>
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
+                      <tr>
+                        <th className="p-2">Product</th>
+                        <th className="p-2">Qty</th>
+                        <th className="p-2 text-right">Desired Disc %</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {custReq?.items?.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="p-2 font-semibold text-foreground">{item.product?.name || 'Product'}</td>
+                          <td className="p-2 font-bold">{item.quantity}</td>
+                          <td className="p-2 text-right font-extrabold text-amber-500">{item.desiredDiscountPercent}%</td>
+                        </tr>
+                      )) || (
+                        <tr>
+                          <td colSpan="3" className="p-3 text-center text-muted-foreground text-xs">No request item details recorded</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-            <ul className="list-disc list-inside text-xs text-slate-300 space-y-1 pl-2">
+
+            {/* SIDE 2: QUOTATION */}
+            <div className="p-4 rounded-xl bg-card border border-border space-y-3 shadow-sm">
+              <div className="flex items-center justify-between border-b border-border pb-2">
+                <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-emerald-500" />
+                  Official Sales Quotation
+                </h3>
+                <span className="text-[10px] font-bold text-emerald-500 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">
+                  {quote?.quoteNumber}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-[11px] font-bold text-muted-foreground uppercase">Quotation Pricing Breakup</p>
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
+                      <tr>
+                        <th className="p-2">Product</th>
+                        <th className="p-2">Qty</th>
+                        <th className="p-2">Price</th>
+                        <th className="p-2">Disc %</th>
+                        <th className="p-2 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {quote?.items?.map((item, idx) => (
+                        <tr key={idx}>
+                          <td className="p-2 font-semibold text-foreground">{item.product?.name}</td>
+                          <td className="p-2">{item.quantity}</td>
+                          <td className="p-2">₹{item.unitPrice?.toLocaleString()}</td>
+                          <td className="p-2 font-bold text-emerald-500">{item.discountPercent}%</td>
+                          <td className="p-2 text-right font-extrabold text-foreground">₹{item.lineTotal?.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-xs space-y-1 text-right pt-1">
+                  <p className="text-muted-foreground">Subtotal: <span className="font-bold text-foreground">₹{quote?.subtotal?.toLocaleString()}</span></p>
+                  <p className="text-muted-foreground">Total Discount: <span className="font-bold text-rose-500">-₹{quote?.totalDiscount?.toLocaleString()}</span></p>
+                  <p className="text-sm font-extrabold text-primary">Grand Total: ₹{quote?.grandTotal?.toLocaleString()}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* RISK ANALYSIS & APPROVAL RATIONALE */}
+          <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-xs font-bold text-rose-500">
+                <ShieldAlert className="w-4 h-4" />
+                Risk Analysis Breakdown (Score: {approval.riskScore}/100)
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Requested Disc: <span className="font-bold text-rose-500">{approval.requestedDiscount}%</span> | Tier Allowed: <span className="font-bold text-emerald-500">{approval.allowedDiscount}%</span>
+              </div>
+            </div>
+            <ul className="list-disc list-inside text-xs text-foreground space-y-1 pl-2">
               {approval.riskReasons?.map((r, i) => (
                 <li key={i}>{r}</li>
               ))}
             </ul>
           </div>
 
-          {/* Line Items Table */}
+          {/* AUDIT TRAIL */}
           <div>
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Quotation Line Items</h3>
-            <div className="border border-slate-800 rounded-xl overflow-hidden">
-              <table className="w-full text-left text-xs text-slate-300">
-                <thead className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800">
-                  <tr>
-                    <th className="p-3">Product</th>
-                    <th className="p-3">Qty</th>
-                    <th className="p-3">Unit Price</th>
-                    <th className="p-3">Discount</th>
-                    <th className="p-3 text-right">Line Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 bg-slate-900/60">
-                  {quote?.items?.map((item, idx) => (
-                    <tr key={idx}>
-                      <td className="p-3 font-semibold text-white">{item.product?.name}</td>
-                      <td className="p-3">{item.quantity}</td>
-                      <td className="p-3">₹{item.unitPrice?.toLocaleString()}</td>
-                      <td className="p-3">
-                        <span className={`font-bold ${item.approvalRequired ? 'text-rose-400' : 'text-emerald-400'}`}>
-                          {item.discountPercent}%
-                        </span>
-                        {item.approvalRequired && <p className="text-[10px] text-rose-400 mt-0.5">{item.breachReason}</p>}
-                      </td>
-                      <td className="p-3 text-right font-bold text-slate-200">₹{item.lineTotal?.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Audit History */}
-          <div>
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <History className="w-3.5 h-3.5" /> Approval Audit Trail
+            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <History className="w-3.5 h-3.5 text-primary" /> Approval Audit Trail
             </h3>
-            <div className="space-y-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800 max-h-36 overflow-y-auto">
+            <div className="space-y-2 bg-muted/40 p-3 rounded-xl border border-border max-h-36 overflow-y-auto">
               {approval.auditTrail?.map((audit, i) => (
-                <div key={i} className="text-xs border-b border-slate-800/60 pb-1.5 last:border-0 last:pb-0">
-                  <div className="flex items-center justify-between text-slate-300">
-                    <span className="font-semibold text-indigo-300">{audit.role}: {audit.action}</span>
-                    <span className="text-[10px] text-slate-500">{new Date(audit.timestamp).toLocaleString()}</span>
+                <div key={i} className="text-xs border-b border-border pb-1.5 last:border-0 last:pb-0">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-primary">{audit.role}: {audit.action}</span>
+                    <span className="text-[10px] text-muted-foreground">{new Date(audit.timestamp).toLocaleString()}</span>
                   </div>
-                  {audit.reason && <p className="text-[11px] text-slate-400 mt-0.5">"{audit.reason}"</p>}
+                  {audit.reason && <p className="text-[11px] text-muted-foreground mt-0.5">"{audit.reason}"</p>}
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Decision Reason Prompt */}
+          {/* DECISION REASON TEXTAREA */}
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Approval Comments / Decision Reason</label>
+            <label className="block text-xs font-bold text-foreground mb-1">Approval Decision Rationale / Comments</label>
             <textarea
               rows="2"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Enter decision rationale or changes requested..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+              placeholder="Enter manager decision notes or feedback..."
+              className="w-full bg-card border border-border rounded-xl p-2.5 text-xs text-foreground focus:border-primary focus:outline-none"
             />
           </div>
 
         </div>
 
         {/* Action Buttons */}
-        <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between">
+        <div className="p-4 border-t border-border bg-muted/30 flex items-center justify-between">
           <button
             type="button"
             disabled={submitting}
             onClick={() => handleAction('RETURN_FOR_CHANGES')}
-            className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-amber-950/60 border border-amber-800/60 text-amber-400 hover:bg-amber-900/60 transition flex items-center gap-1.5"
+            className="px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20 transition flex items-center gap-1.5"
           >
             <RotateCcw className="w-3.5 h-3.5" /> Return for Changes
           </button>
@@ -164,7 +237,7 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
               type="button"
               disabled={submitting}
               onClick={() => handleAction('REJECT')}
-              className="px-4 py-2 text-xs font-semibold rounded-lg bg-rose-950/60 border border-rose-800/60 text-rose-400 hover:bg-rose-900/60 transition flex items-center gap-1.5"
+              className="px-4 py-2 text-xs font-bold rounded-xl bg-rose-500 hover:bg-rose-600 text-white transition flex items-center gap-1.5 shadow"
             >
               <XCircle className="w-3.5 h-3.5" /> Reject Deal
             </button>
@@ -172,7 +245,7 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
               type="button"
               disabled={submitting}
               onClick={() => handleAction('APPROVE')}
-              className="px-5 py-2 text-xs font-bold rounded-lg bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white shadow-lg shadow-emerald-900/30 transition flex items-center gap-1.5"
+              className="px-5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shadow"
             >
               <CheckCircle className="w-3.5 h-3.5" /> Approve Quotation
             </button>

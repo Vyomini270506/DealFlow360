@@ -311,6 +311,7 @@ const seedData = async () => {
       customerRequest: req2._id,
       customer: customerDocB._id,
       salesRep: salesRepB._id,
+      salesManager: salesManagerA._id,
       requestedDiscount: 18,
       allowedDiscount: 10,
       currentStep: 'SALES_MANAGER',

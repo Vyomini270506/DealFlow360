@@ -24,6 +24,8 @@ const getQuotations = async (req, res) => {
     } else if (req.user.role === 'CUSTOMER') {
       if (req.user.customerId) {
         filter.customer = req.user.customerId._id || req.user.customerId;
+        // Customer must NOT see quotations waiting for approval or in draft state
+        filter.status = { $nin: ['Draft', 'Pending Approval'] };
       }
     }
 
@@ -71,6 +73,9 @@ const getQuotationById = async (req, res) => {
       const userCustId = req.user.customerId?._id ? req.user.customerId._id.toString() : req.user.customerId?.toString();
       if (!userCustId || quotation.customer._id.toString() !== userCustId) {
         return res.status(403).json({ message: 'Not authorized to view this quotation' });
+      }
+      if (quotation.status === 'Draft' || quotation.status === 'Pending Approval') {
+        return res.status(403).json({ message: 'Quotation is currently under review and has not been released to customer' });
       }
     }
 
@@ -220,22 +225,36 @@ const submitQuotation = async (req, res) => {
     quotation.riskLevel = riskAnalysis.level;
     quotation.riskReasons = riskAnalysis.reasons;
 
-    if (riskAnalysis.requiredApproval === 'NONE') {
-      quotation.status = 'Approved';
-      quotation.approvalChainState = 'APPROVED';
-    } else {
-      quotation.status = 'Pending Approval';
-      quotation.approvalChainState = 'SALES_MANAGER';
-    }
+    // Send for Manager approval
+    quotation.status = 'Pending Approval';
+    quotation.approvalChainState = 'SALES_MANAGER';
+
+    const salesRepUser = await User.findById(quotation.salesRep);
+    const assignedManagerId = quotation.assignedSalesManager || salesRepUser?.salesManagerId || null;
 
     await quotation.save();
+
+    // Calculate max discount requested vs allowed across items
+    let maxRequestedDisc = 0;
+    let maxAllowedDisc = 0;
+    if (quotation.items && Array.isArray(quotation.items)) {
+      quotation.items.forEach(i => {
+        if (i.discountPercent > maxRequestedDisc) maxRequestedDisc = i.discountPercent;
+        if (i.allowedDiscountPercent > maxAllowedDisc) maxAllowedDisc = i.allowedDiscountPercent;
+      });
+    }
 
     // Create or update Approval document
     let approval = await Approval.findOne({ quotation: quotation._id });
     if (!approval) {
       approval = new Approval({
         quotation: quotation._id,
+        customerRequest: quotation.customerRequest || null,
+        customer: quotation.customer,
         salesRep: quotation.salesRep,
+        salesManager: assignedManagerId,
+        requestedDiscount: maxRequestedDisc,
+        allowedDiscount: maxAllowedDisc,
         currentStep: 'SALES_MANAGER',
         riskScore: riskAnalysis.score,
         riskLevel: riskAnalysis.level,
@@ -246,18 +265,26 @@ const submitQuotation = async (req, res) => {
           user: req.user._id,
           action: 'SUBMITTED',
           role: req.user.role,
-          reason: 'Quotation submitted for approval workflow'
+          reason: 'Quotation submitted for Sales Manager approval'
         }]
       });
     } else {
+      approval.customerRequest = quotation.customerRequest || approval.customerRequest;
+      approval.customer = quotation.customer || approval.customer;
+      approval.salesManager = assignedManagerId || approval.salesManager;
+      approval.requestedDiscount = maxRequestedDisc;
+      approval.allowedDiscount = maxAllowedDisc;
       approval.currentStep = 'SALES_MANAGER';
+      approval.riskScore = riskAnalysis.score;
+      approval.riskLevel = riskAnalysis.level;
+      approval.riskReasons = riskAnalysis.reasons;
       approval.managerApproval.status = 'PENDING';
       approval.financeApproval.status = riskAnalysis.level === 'HIGH' ? 'PENDING' : 'NOT_REQUIRED';
       approval.auditTrail.push({
         user: req.user._id,
         action: 'SUBMITTED',
         role: req.user.role,
-        reason: 'Quotation re-submitted for approval'
+        reason: 'Quotation re-submitted for Sales Manager approval'
       });
     }
 
@@ -339,8 +366,17 @@ const sendQuotation = async (req, res) => {
       return res.status(404).json({ message: 'Quotation not found' });
     }
 
-    if (req.user.role === 'SALES_REP' && quotation.salesRep && quotation.salesRep.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized to send this quotation' });
+    if (req.user.role === 'SALES_REP') {
+      if (quotation.salesRep && quotation.salesRep.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ message: 'Not authorized to send this quotation' });
+      }
+
+      // Risk enforcement: Medium and High risk quotations MUST be approved by Sales Manager
+      if ((quotation.riskLevel === 'MEDIUM' || quotation.riskLevel === 'HIGH') && quotation.approvalChainState !== 'APPROVED') {
+        return res.status(403).json({
+          message: `${quotation.riskLevel} risk quotations require Sales Manager approval before sending to customer.`
+        });
+      }
     }
 
     quotation.status = 'Approved';
