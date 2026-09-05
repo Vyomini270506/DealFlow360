@@ -12,12 +12,21 @@ const LoginPage = () => {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const [selectedDemoRoleFilter, setSelectedDemoRoleFilter] = useState('ALL');
+
   const demoAccounts = [
-    { role: 'ADMIN', label: 'System Admin', email: 'admin@dealflow360.com', pass: 'password123', color: 'border-rose-500/40 text-rose-500 bg-rose-500/10 hover:bg-rose-500/20' },
-    { role: 'SALES_MANAGER', label: 'Sales Manager', email: 'manager@dealflow360.com', pass: 'password123', color: 'border-purple-500/40 text-purple-500 bg-purple-500/10 hover:bg-purple-500/20' },
-    { role: 'SALES_REP', label: 'Sales Representative', email: 'rahul@dealflow360.com', pass: 'password123', color: 'border-blue-500/40 text-blue-500 bg-blue-500/10 hover:bg-blue-500/20' },
-    { role: 'FINANCE_OPERATIONS', label: 'Finance & Ops', email: 'finance@dealflow360.com', pass: 'password123', color: 'border-emerald-500/40 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20' },
-    { role: 'CUSTOMER', label: 'Customer Portal', email: 'customer@acmecorp.com', pass: 'password123', color: 'border-cyan-500/40 text-cyan-500 bg-cyan-500/10 hover:bg-cyan-500/20' },
+    { role: 'ADMIN', label: 'Admin User', email: 'admin@dealflow360.com', pass: 'password123', color: 'border-rose-500/40 text-rose-500 bg-rose-500/10 hover:bg-rose-500/20' },
+    { role: 'SALES_MANAGER', label: 'Sales Manager A', email: 'manager.a@dealflow360.com', pass: 'password123', color: 'border-purple-500/40 text-purple-500 bg-purple-500/10 hover:bg-purple-500/20' },
+    { role: 'SALES_MANAGER', label: 'Sales Manager B', email: 'manager.b@dealflow360.com', pass: 'password123', color: 'border-purple-500/40 text-purple-500 bg-purple-500/10 hover:bg-purple-500/20' },
+    { role: 'SALES_REP', label: 'Sales Rep A', email: 'salesrep.a@dealflow360.com', pass: 'password123', color: 'border-blue-500/40 text-blue-500 bg-blue-500/10 hover:bg-blue-500/20' },
+    { role: 'SALES_REP', label: 'Sales Rep B', email: 'salesrep.b@dealflow360.com', pass: 'password123', color: 'border-blue-500/40 text-blue-500 bg-blue-500/10 hover:bg-blue-500/20' },
+    { role: 'SALES_REP', label: 'Sales Rep C', email: 'salesrep.c@dealflow360.com', pass: 'password123', color: 'border-blue-500/40 text-blue-500 bg-blue-500/10 hover:bg-blue-500/20' },
+    { role: 'FINANCE_OPERATIONS', label: 'Finance/Operations A', email: 'finance.a@dealflow360.com', pass: 'password123', color: 'border-emerald-500/40 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20' },
+    { role: 'FINANCE_OPERATIONS', label: 'Finance/Operations B', email: 'finance.b@dealflow360.com', pass: 'password123', color: 'border-emerald-500/40 text-emerald-500 bg-emerald-500/10 hover:bg-emerald-500/20' },
+    { role: 'CUSTOMER', label: 'Customer A (Acme Corp)', email: 'customer.a@acmecorp.com', pass: 'password123', color: 'border-cyan-500/40 text-cyan-500 bg-cyan-500/10 hover:bg-cyan-500/20' },
+    { role: 'CUSTOMER', label: 'Customer B (TechNova)', email: 'customer.b@technova.io', pass: 'password123', color: 'border-cyan-500/40 text-cyan-500 bg-cyan-500/10 hover:bg-cyan-500/20' },
+    { role: 'CUSTOMER', label: 'Customer C (Global Systems)', email: 'customer.c@globalsys.com', pass: 'password123', color: 'border-cyan-500/40 text-cyan-500 bg-cyan-500/10 hover:bg-cyan-500/20' },
+    { role: 'CUSTOMER', label: 'Customer D (Urban Retail)', email: 'customer.d@urbanretail.in', pass: 'password123', color: 'border-cyan-500/40 text-cyan-500 bg-cyan-500/10 hover:bg-cyan-500/20' },
   ];
 
   const handleSubmit = async (e) => {
@@ -165,27 +174,48 @@ const LoginPage = () => {
             </button>
           </form>
 
-          {/* Demo Accounts List Section */}
+          {/* Demo Accounts List Section (12 Demo Accounts) */}
           <div className="pt-4 border-t border-border space-y-2.5">
-            <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-              <Key className="w-3.5 h-3.5 text-primary" />
-              Demo Credentials (1-Click Login)
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <Key className="w-3.5 h-3.5 text-primary" />
+                12 Demo Accounts (1-Click Login)
+              </p>
+            </div>
 
-            <div className="space-y-1.5">
-              {demoAccounts.map((demo) => (
+            {/* Role Filter Chips */}
+            <div className="flex items-center gap-1 overflow-x-auto pb-1 text-[10px] font-bold">
+              {['ALL', 'CUSTOMER', 'SALES_REP', 'SALES_MANAGER', 'FINANCE_OPERATIONS', 'ADMIN'].map(r => (
                 <button
-                  key={demo.role}
-                  onClick={() => handleFillDemo(demo)}
-                  className={`w-full p-2.5 rounded-xl border text-left text-xs font-bold flex items-center justify-between transition ${demo.color}`}
+                  key={r}
+                  type="button"
+                  onClick={() => setSelectedDemoRoleFilter(r)}
+                  className={`px-2 py-0.5 rounded-full border transition shrink-0 ${
+                    selectedDemoRoleFilter === r ? 'bg-primary text-white border-primary' : 'bg-muted/50 text-muted-foreground border-border hover:text-foreground'
+                  }`}
                 >
-                  <div>
-                    <p className="font-extrabold leading-tight">{demo.label}</p>
-                    <p className="text-[10px] opacity-80 font-mono leading-tight">{demo.email}</p>
-                  </div>
-                  <span className="text-[10px] font-semibold underline">Fill & Login $\rightarrow$</span>
+                  {r === 'ALL' ? 'All (12)' : r.replace('_', ' ')}
                 </button>
               ))}
+            </div>
+
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {demoAccounts
+                .filter(d => selectedDemoRoleFilter === 'ALL' || d.role === selectedDemoRoleFilter)
+                .map((demo) => (
+                  <button
+                    key={demo.email}
+                    type="button"
+                    onClick={() => handleFillDemo(demo)}
+                    className={`w-full p-2.5 rounded-xl border text-left text-xs font-bold flex items-center justify-between transition ${demo.color}`}
+                  >
+                    <div>
+                      <p className="font-extrabold leading-tight">{demo.label}</p>
+                      <p className="text-[10px] opacity-80 font-mono leading-tight">{demo.email}</p>
+                    </div>
+                    <span className="text-[10px] font-semibold underline">Login →</span>
+                  </button>
+                ))}
             </div>
           </div>
 

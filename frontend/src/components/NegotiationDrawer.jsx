@@ -36,6 +36,30 @@ const NegotiationDrawer = ({ isOpen, quotationId, onClose, onSuccess }) => {
     }
   };
 
+  const handleAcceptNegotiation = async () => {
+    try {
+      await API.post(`/negotiations/quotation/${quotationId}/accept`);
+      toast.success('Negotiation accepted successfully! Quotation confirmed.');
+      fetchNegotiation();
+      if (onSuccess) onSuccess();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to accept negotiation');
+    }
+  };
+
+  const handleEscalateToManager = async () => {
+    try {
+      await API.post(`/negotiations/quotation/${quotationId}/escalate-manager`, {
+        reason: 'Discount/Risk score exceeds Sales Rep authority'
+      });
+      toast.info('Negotiation sent to Sales Manager for approval!');
+      fetchNegotiation();
+      if (onSuccess) onSuccess();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Escalation failed');
+    }
+  };
+
   if (!isOpen) return null;
 
   const handleSendMessage = async (e) => {
@@ -72,8 +96,11 @@ const NegotiationDrawer = ({ isOpen, quotationId, onClose, onSuccess }) => {
     }
   };
 
+  const isLowRisk = quotation && (quotation.riskLevel === 'LOW' && quotation.riskScore < 30);
+  const isPendingManager = negotiation?.status === 'PENDING_MANAGER_APPROVAL' || quotation?.status === 'Pending Approval';
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end">
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex justify-end text-left">
       <div className="bg-slate-900 border-l border-slate-700/80 w-full max-w-xl h-full flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
         
         {/* Header */}
@@ -92,6 +119,58 @@ const NegotiationDrawer = ({ isOpen, quotationId, onClose, onSuccess }) => {
 
         {/* Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
+
+          {/* Sales Representative Actions & Risk Authority Banner */}
+          {user.role === 'SALES_REP' && quotation && (
+            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-bold text-slate-300">Risk Assessment & Authority</p>
+                  <p className="text-[11px] text-slate-400">Score: {quotation.riskScore || 0} | Level: {quotation.riskLevel || 'LOW'}</p>
+                </div>
+
+                {isPendingManager ? (
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    WAITING FOR SALES MANAGER APPROVAL
+                  </span>
+                ) : isLowRisk ? (
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    Within Rep Authority
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                    Exceeds Rep Authority
+                  </span>
+                )}
+              </div>
+
+              {/* Action Buttons for Sales Rep */}
+              <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+                {isLowRisk && !isPendingManager && quotation.status !== 'Confirmed' && (
+                  <button
+                    onClick={handleAcceptNegotiation}
+                    className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition"
+                  >
+                    [ Accept Negotiation ]
+                  </button>
+                )}
+
+                {(!isLowRisk || isPendingManager) && quotation.status !== 'Confirmed' && (
+                  <button
+                    onClick={handleEscalateToManager}
+                    disabled={isPendingManager}
+                    className={`flex-1 py-2 rounded-xl font-bold text-xs transition ${
+                      isPendingManager
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                        : 'bg-amber-500 hover:bg-amber-600 text-slate-950 shadow'
+                    }`}
+                  >
+                    {isPendingManager ? 'WAITING FOR SALES MANAGER APPROVAL' : '[ SEND TO SALES MANAGER ]'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           
           {/* Item Selector Tabs */}
           {quotation?.items && (

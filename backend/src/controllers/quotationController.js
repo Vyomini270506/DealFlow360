@@ -330,11 +330,40 @@ const rejectQuotation = async (req, res) => {
   }
 };
 
+// @desc Sales Rep sends quotation to Customer
+// @route POST /api/quotations/:id/send
+const sendQuotation = async (req, res) => {
+  try {
+    const quotation = await Quotation.findById(req.params.id);
+    if (!quotation) {
+      return res.status(404).json({ message: 'Quotation not found' });
+    }
+
+    if (req.user.role === 'SALES_REP' && quotation.salesRep && quotation.salesRep.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized to send this quotation' });
+    }
+
+    quotation.status = 'Approved';
+    quotation.approvalChainState = 'APPROVED';
+    await quotation.save();
+
+    const CustomerRequest = require('../models/CustomerRequest');
+    if (quotation.customerRequest) {
+      await CustomerRequest.findByIdAndUpdate(quotation.customerRequest, { status: 'Quoted' });
+    }
+
+    res.json({ message: 'Quotation sent to Customer successfully!', quotation });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getQuotations,
   getQuotationById,
   createQuotation,
   submitQuotation,
+  sendQuotation,
   acceptQuotation,
   rejectQuotation
 };

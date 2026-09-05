@@ -1,18 +1,47 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import API from '../services/api';
 import KPICard from '../components/KPICard';
 import { StatusBadge, RiskBadge } from '../components/StatusBadge';
 import QuotationModal from '../components/QuotationModal';
 import NegotiationDrawer from '../components/NegotiationDrawer';
-import { Plus, FileText, CheckSquare, AlertTriangle, Truck, MessageSquare, IndianRupee, Eye, ShoppingCart, Send, ArrowRight } from 'lucide-react';
+import { 
+  LayoutDashboard, 
+  ShoppingCart, 
+  FileText, 
+  MessageSquare, 
+  UserCheck, 
+  Plus, 
+  Send, 
+  Eye, 
+  CheckCircle, 
+  AlertTriangle, 
+  ArrowRight, 
+  IndianRupee, 
+  XCircle,
+  Clock,
+  Building2,
+  ShieldCheck
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 const SalesRepDashboard = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') || 'dashboard';
+
+  const setActiveTab = (tabName) => {
+    setSearchParams({ tab: tabName });
+  };
+
   const [quotations, setQuotations] = useState([]);
   const [customerRequests, setCustomerRequests] = useState([]);
+  const [negotiations, setNegotiations] = useState([]);
   const [loading, setLoading] = useState(true);
+
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [activeNegotiationId, setActiveNegotiationId] = useState(null);
+  const [selectedRequestModal, setSelectedRequestModal] = useState(null);
+  const [selectedQuotationView, setSelectedQuotationView] = useState(null);
 
   useEffect(() => {
     fetchDashboardData();
@@ -21,15 +50,17 @@ const SalesRepDashboard = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [qRes, reqRes] = await Promise.all([
+      const [qRes, reqRes, negRes] = await Promise.all([
         API.get('/quotations'),
-        API.get('/customer-requests').catch(() => ({ data: [] }))
+        API.get('/customer-requests').catch(() => ({ data: [] })),
+        API.get('/negotiations/sales-rep').catch(() => ({ data: [] }))
       ]);
 
       setQuotations(qRes.data || []);
       setCustomerRequests(reqRes.data || []);
+      setNegotiations(negRes.data || []);
     } catch (err) {
-      toast.error('Failed to load sales rep dashboard data');
+      toast.error('Failed to load Sales Representative dashboard data');
     } finally {
       setLoading(false);
     }
@@ -37,39 +68,64 @@ const SalesRepDashboard = () => {
 
   const handleCreateQuotationFromRequest = async (requestId) => {
     try {
-      await API.post(`/customer-requests/${requestId}/create-quotation`, {});
-      toast.success('Official Quotation created and sent to Customer successfully!');
+      const { data } = await API.post(`/customer-requests/${requestId}/create-quotation`, {});
+      toast.success('Quotation created from request and sent to Customer successfully!');
       fetchDashboardData();
+      setActiveTab('quotations');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to create quotation');
     }
   };
 
-  const handleEscalateToManager = async (requestId) => {
+  const handleSendQuotation = async (quoteId) => {
     try {
-      await API.post(`/customer-requests/${requestId}/escalate`, {
-        escalationReason: 'Discount/Risk score exceeds rep authority. Escalated to Sales Manager for signoff.'
+      await API.post(`/quotations/${quoteId}/send`);
+      toast.success('Quotation sent to Customer successfully!');
+      fetchDashboardData();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to send quotation');
+    }
+  };
+
+  const handleAcceptNegotiationDirectly = async (quotationId) => {
+    try {
+      await API.post(`/negotiations/quotation/${quotationId}/accept`);
+      toast.success('Negotiation counter-offer accepted! Quotation confirmed.');
+      fetchDashboardData();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to accept negotiation');
+    }
+  };
+
+  const handleEscalateNegotiationToManager = async (quotationId) => {
+    try {
+      await API.post(`/negotiations/quotation/${quotationId}/escalate-manager`, {
+        reason: 'Discount/Risk score exceeds Sales Rep authority'
       });
-      toast.success('Request escalated to Sales Manager for approval!');
+      toast.info('Negotiation sent to Sales Manager for approval!');
       fetchDashboardData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Escalation failed');
     }
   };
 
-  const openQuotes = quotations.filter(q => q.status === 'Draft' || q.status === 'Negotiation');
-  const pendingApprovals = quotations.filter(q => q.status === 'Pending Approval');
-  const atRiskDeals = quotations.filter(q => q.riskLevel === 'HIGH' || q.riskScore >= 60);
+  const pendingApprovalsCount = quotations.filter(q => q.status === 'Pending Approval').length;
+  const atRiskDealsCount = quotations.filter(q => q.riskLevel === 'HIGH' || q.riskScore >= 60).length;
   const pipelineValue = quotations.reduce((sum, q) => sum + (q.grandTotal || 0), 0);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 max-w-7xl mx-auto text-left">
       
       {/* Header Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-indigo-600/15 via-card to-cyan-500/15 p-6 rounded-2xl border border-border flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
         <div>
-          <h1 className="text-2xl font-extrabold text-foreground tracking-tight">Sales Representative Dashboard</h1>
-          <p className="text-xs text-muted-foreground">Review incoming customer product requests, evaluate risk, issue official quotations, and respond to negotiations</p>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-extrabold text-primary uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/30">
+              Sales Representative Portal
+            </span>
+          </div>
+          <h1 className="text-2xl font-extrabold text-foreground mt-1.5">Sales Representative Workspace</h1>
+          <p className="text-xs text-muted-foreground font-medium">Review customer requests, issue official quotations, and manage discount negotiations</p>
         </div>
 
         <button
@@ -80,173 +136,593 @@ const SalesRepDashboard = () => {
         </button>
       </div>
 
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Assigned Product Requests" value={customerRequests.length} subtitle="Automatically assigned via workload" icon={ShoppingCart} color="indigo" />
-        <KPICard title="My Active Pipeline" value={`₹${(pipelineValue / 100000).toFixed(1)}L`} subtitle="All active deals" icon={IndianRupee} color="cyan" />
-        <KPICard title="Pending Approvals" value={pendingApprovals.length} subtitle="Awaiting manager signoff" icon={CheckSquare} color="amber" />
-        <KPICard title="At-Risk Deals" value={atRiskDeals.length} subtitle="Score 60+" icon={AlertTriangle} color="rose" />
+      {/* Navigation Tabs */}
+      <div className="flex items-center gap-1 bg-muted/60 p-1.5 rounded-2xl border border-border overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition shrink-0 ${
+            activeTab === 'dashboard' ? 'bg-primary text-white shadow-md' : 'text-muted-foreground hover:text-foreground hover:bg-card/50'
+          }`}
+        >
+          <LayoutDashboard className="w-4 h-4" />
+          <span>Dashboard</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('requests')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition shrink-0 ${
+            activeTab === 'requests' ? 'bg-primary text-white shadow-md' : 'text-muted-foreground hover:text-foreground hover:bg-card/50'
+          }`}
+        >
+          <ShoppingCart className="w-4 h-4" />
+          <span>Customer Requests</span>
+          {customerRequests.length > 0 && (
+            <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-bold">{customerRequests.length}</span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('quotations')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition shrink-0 ${
+            activeTab === 'quotations' ? 'bg-primary text-white shadow-md' : 'text-muted-foreground hover:text-foreground hover:bg-card/50'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>Quotations</span>
+          {quotations.length > 0 && (
+            <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-bold">{quotations.length}</span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('negotiations')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition shrink-0 ${
+            activeTab === 'negotiations' ? 'bg-primary text-white shadow-md' : 'text-muted-foreground hover:text-foreground hover:bg-card/50'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          <span>Negotiations</span>
+          {negotiations.length > 0 && (
+            <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-bold">{negotiations.length}</span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('profile')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition shrink-0 ${
+            activeTab === 'profile' ? 'bg-primary text-white shadow-md' : 'text-muted-foreground hover:text-foreground hover:bg-card/50'
+          }`}
+        >
+          <UserCheck className="w-4 h-4" />
+          <span>Profile</span>
+        </button>
       </div>
 
-      {/* MY ASSIGNED CUSTOMER PRODUCT REQUESTS TABLE */}
-      <div className="glass-panel rounded-2xl p-5 space-y-4 border-l-4 border-l-primary">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-extrabold text-foreground uppercase tracking-wider flex items-center gap-2">
-              <ShoppingCart className="w-4 h-4 text-primary" />
-              My Assigned Customer Product Requests
-            </h2>
-            <p className="text-xs text-muted-foreground">Assigned to you automatically by backend least-workload engine. Review risk and issue official quotations.</p>
+      {/* TAB 1: DASHBOARD (OVERVIEW) */}
+      {activeTab === 'dashboard' && (
+        <div className="space-y-6">
+          {/* KPI Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <KPICard title="Assigned Product Requests" value={customerRequests.length} subtitle="Assigned via workload" icon={ShoppingCart} color="indigo" />
+            <KPICard title="My Active Pipeline" value={`₹${(pipelineValue / 100000).toFixed(1)}L`} subtitle="All active deals" icon={IndianRupee} color="cyan" />
+            <KPICard title="Pending Approvals" value={pendingApprovalsCount} subtitle="Awaiting manager signoff" icon={Clock} color="amber" />
+            <KPICard title="Active Negotiations" value={negotiations.length} subtitle="Customer discount counter-offers" icon={MessageSquare} color="emerald" />
           </div>
-          <span className="text-xs font-bold text-primary px-2.5 py-1 rounded-full bg-primary/10 border border-primary/30">
-            {customerRequests.length} Requests
-          </span>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            {/* Customer Requests Quick View */}
+            <div className="glass-panel p-5 rounded-2xl border border-border space-y-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between border-b border-border pb-3">
+                  <h3 className="text-sm font-extrabold text-foreground flex items-center gap-2">
+                    <ShoppingCart className="w-4 h-4 text-primary" />
+                    Incoming Product Requests
+                  </h3>
+                  <button 
+                    onClick={() => setActiveTab('requests')}
+                    className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                  >
+                    View All ({customerRequests.length}) <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+
+                {customerRequests.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-6 text-center">No assigned customer product requests.</p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {customerRequests.slice(0, 3).map((r) => (
+                      <div key={r._id} className="p-3 rounded-xl bg-card border border-border flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-bold text-primary">{r.requestNumber}</p>
+                          <p className="text-[11px] font-semibold text-foreground">{r.customer?.company || r.customer?.name}</p>
+                        </div>
+                        <button
+                          onClick={() => handleCreateQuotationFromRequest(r._id)}
+                          className="px-2.5 py-1 rounded-lg bg-primary text-white font-bold text-[11px] shadow"
+                        >
+                          Create Quote
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Active Negotiations Quick View */}
+            <div className="glass-panel p-5 rounded-2xl border border-border space-y-4 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between border-b border-border pb-3">
+                  <h3 className="text-sm font-extrabold text-foreground flex items-center gap-2">
+                    <MessageSquare className="w-4 h-4 text-amber-500" />
+                    Pending Discount Negotiations
+                  </h3>
+                  <button 
+                    onClick={() => setActiveTab('negotiations')}
+                    className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                  >
+                    View All ({negotiations.length}) <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+
+                {negotiations.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-6 text-center">No active negotiation threads.</p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {negotiations.slice(0, 3).map((n) => (
+                      <div key={n._id} className="p-3 rounded-xl bg-card border border-border flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-bold text-foreground">{n.quotation?.quoteNumber || 'Quotation'}</p>
+                          <p className="text-[11px] text-muted-foreground">{n.customer?.company || 'Customer'}</p>
+                        </div>
+                        <button
+                          onClick={() => setActiveNegotiationId(n.quotation?._id || n.quotation)}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500 text-white font-bold text-[11px] shadow"
+                        >
+                          Review Thread
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
         </div>
+      )}
 
-        {customerRequests.length === 0 ? (
-          <div className="p-6 text-center bg-card rounded-xl border border-border">
-            <p className="text-xs font-bold text-muted-foreground">No customer product requests currently pending review.</p>
+      {/* TAB 2: CUSTOMER REQUESTS */}
+      {activeTab === 'requests' && (
+        <div className="glass-panel rounded-2xl p-6 space-y-6">
+          <div className="border-b border-border pb-4">
+            <h2 className="text-base font-extrabold text-foreground flex items-center gap-2">
+              <ShoppingCart className="w-5 h-5 text-primary" />
+              Assigned Customer Product Requests
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Requests automatically assigned to you based on active workload balancing. Review customer requirements and issue official quotations.</p>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-foreground">
-              <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
-                <tr>
-                  <th className="p-3">Request Ref</th>
-                  <th className="p-3">Customer</th>
-                  <th className="p-3">Products & Quantities</th>
-                  <th className="p-3">Desired Discount</th>
-                  <th className="p-3">Risk Assessment</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3 text-right">Rep Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border bg-card">
-                {customerRequests.map((reqItem) => {
-                  const isLowRisk = reqItem.riskLevel === 'LOW';
-                  const isEscalated = reqItem.status === 'Escalated_Manager';
-                  const isQuoted = reqItem.status === 'Quoted';
 
-                  return (
-                    <tr key={reqItem._id} className="hover:bg-muted/50 transition">
-                      <td className="p-3 font-bold text-primary">{reqItem.requestNumber}</td>
-                      <td className="p-3">
-                        <p className="font-bold text-foreground">{reqItem.customer?.company || reqItem.customer?.name}</p>
-                        <p className="text-[10px] text-muted-foreground font-medium">{reqItem.customer?.tier} Tier</p>
-                      </td>
-                      <td className="p-3">
-                        {reqItem.items?.map((i, idx) => (
-                          <div key={idx} className="text-[11px]">
-                            <span className="font-bold">{i.quantity}x</span> {i.product?.name || 'Product'}
-                          </div>
-                        ))}
-                      </td>
-                      <td className="p-3 font-extrabold text-foreground">
-                        {reqItem.items?.map(i => `${i.desiredDiscountPercent}%`).join(', ')}
-                      </td>
-                      <td className="p-3">
-                        <RiskBadge level={reqItem.riskLevel} score={reqItem.riskScore} />
-                        {reqItem.riskReasons && reqItem.riskReasons.length > 0 && (
-                          <p className="text-[10px] text-rose-500 font-medium mt-0.5">{reqItem.riskReasons[0]}</p>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                          isQuoted ? 'bg-success/10 text-success border border-success/30' : 
-                          isEscalated ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30' : 
-                          'bg-primary/10 text-primary border border-primary/30'
-                        }`}>
-                          {reqItem.status}
-                        </span>
-                      </td>
-                      <td className="p-3 text-right space-x-2">
-                        {isQuoted ? (
-                          <span className="text-[11px] font-bold text-success flex items-center justify-end gap-1">
-                            ✓ Quotation Sent
+          {customerRequests.length === 0 ? (
+            <div className="p-8 text-center bg-card rounded-xl border border-border">
+              <p className="text-xs font-bold text-muted-foreground">No customer product requests currently assigned.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-foreground">
+                <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
+                  <tr>
+                    <th className="p-3.5">Request Ref</th>
+                    <th className="p-3.5">Customer / Company</th>
+                    <th className="p-3.5">Products Requested</th>
+                    <th className="p-3.5">Desired Discount %</th>
+                    <th className="p-3.5">Risk Assessment</th>
+                    <th className="p-3.5">Status</th>
+                    <th className="p-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border bg-card">
+                  {customerRequests.map((reqItem) => {
+                    const isQuoted = reqItem.status === 'Quoted';
+                    return (
+                      <tr key={reqItem._id} className="hover:bg-muted/50 transition">
+                        <td className="p-3.5 font-bold text-primary">{reqItem.requestNumber}</td>
+                        <td className="p-3.5">
+                          <p className="font-bold text-foreground">{reqItem.customer?.company || reqItem.customer?.name}</p>
+                          <p className="text-[10px] text-muted-foreground">{reqItem.customer?.tier || 'Gold'} Tier</p>
+                        </td>
+                        <td className="p-3.5">
+                          {reqItem.items?.map((i, idx) => (
+                            <div key={idx} className="text-xs font-medium">
+                              <span className="font-bold text-foreground">{i.quantity}x</span> {i.product?.name || 'Product'}
+                            </div>
+                          ))}
+                        </td>
+                        <td className="p-3.5 font-extrabold text-foreground">
+                          {reqItem.items?.map(i => `${i.desiredDiscountPercent}%`).join(', ')}
+                        </td>
+                        <td className="p-3.5">
+                          <RiskBadge level={reqItem.riskLevel} score={reqItem.riskScore} />
+                        </td>
+                        <td className="p-3.5">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                            isQuoted ? 'bg-success/10 text-success border border-success/30' : 'bg-primary/10 text-primary border border-primary/30'
+                          }`}>
+                            {reqItem.status}
                           </span>
-                        ) : isLowRisk || reqItem.status === 'Approved_Manager' ? (
+                        </td>
+                        <td className="p-3.5 text-right space-x-2">
                           <button
-                            onClick={() => handleCreateQuotationFromRequest(reqItem._id)}
-                            className="px-3 py-1.5 rounded-lg bg-primary hover:bg-primary-hover text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                            onClick={() => setSelectedRequestModal(reqItem)}
+                            className="px-3 py-1.5 rounded-xl bg-muted border border-border text-foreground hover:bg-card font-bold text-xs inline-flex items-center gap-1 transition"
                           >
-                            <Send className="w-3.5 h-3.5" /> Create Quotation
+                            <Eye className="w-3.5 h-3.5 text-primary" /> View Request
                           </button>
-                        ) : (
+
+                          {isQuoted ? (
+                            <span className="text-[11px] font-bold text-success inline-flex items-center gap-1">
+                              ✓ Quotation Sent
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleCreateQuotationFromRequest(reqItem._id)}
+                              className="px-3 py-1.5 rounded-xl bg-primary hover:bg-primary-hover text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                            >
+                              <Send className="w-3.5 h-3.5" /> Create Quotation
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: QUOTATIONS */}
+      {activeTab === 'quotations' && (
+        <div className="glass-panel rounded-2xl p-6 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
+            <div>
+              <h2 className="text-base font-extrabold text-foreground flex items-center gap-2">
+                <FileText className="w-5 h-5 text-primary" />
+                My Quotations & Pipeline
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Manage and send official sales proposals created for your assigned customers</p>
+            </div>
+
+            <button
+              onClick={() => setIsCreateOpen(true)}
+              className="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs shadow flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" /> + Create Direct Quotation
+            </button>
+          </div>
+
+          {quotations.length === 0 ? (
+            <div className="p-8 text-center bg-card rounded-xl border border-border">
+              <p className="text-xs font-bold text-muted-foreground">No quotations created yet.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-foreground">
+                <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
+                  <tr>
+                    <th className="p-3.5">Quote Ref</th>
+                    <th className="p-3.5">Customer</th>
+                    <th className="p-3.5">Grand Total</th>
+                    <th className="p-3.5">Risk Score</th>
+                    <th className="p-3.5">Status</th>
+                    <th className="p-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border bg-card">
+                  {quotations.map((q) => (
+                    <tr key={q._id} className="hover:bg-muted/50 transition">
+                      <td className="p-3.5 font-bold text-foreground">{q.quoteNumber}</td>
+                      <td className="p-3.5">
+                        <p className="font-bold text-foreground">{q.customer?.company || q.customer?.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{q.customer?.tier || 'Gold'} Tier</p>
+                      </td>
+                      <td className="p-3.5 font-extrabold text-primary text-sm">₹{q.grandTotal?.toLocaleString()}</td>
+                      <td className="p-3.5">
+                        <RiskBadge level={q.riskLevel} score={q.riskScore} />
+                      </td>
+                      <td className="p-3.5">
+                        <StatusBadge status={q.status} />
+                      </td>
+                      <td className="p-3.5 text-right space-x-2">
+                        <button
+                          onClick={() => setSelectedQuotationView(q)}
+                          className="px-3 py-1.5 rounded-xl bg-muted border border-border text-foreground hover:bg-card font-bold text-xs inline-flex items-center gap-1 transition"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-primary" /> View
+                        </button>
+
+                        {q.status === 'Draft' && (
                           <button
-                            onClick={() => handleEscalateToManager(reqItem._id)}
-                            disabled={isEscalated}
-                            className={`px-3 py-1.5 rounded-lg font-bold text-xs inline-flex items-center gap-1 transition ${
-                              isEscalated 
-                                ? 'bg-muted text-muted-foreground border border-border cursor-not-allowed'
-                                : 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm'
-                            }`}
+                            onClick={() => handleSendQuotation(q._id)}
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
                           >
-                            <ArrowRight className="w-3.5 h-3.5" />
-                            <span>{isEscalated ? 'Awaiting Manager' : 'Send to Sales Manager'}</span>
+                            <Send className="w-3.5 h-3.5" /> Send to Customer
                           </button>
                         )}
+
+                        <button
+                          onClick={() => setActiveNegotiationId(q._id)}
+                          className="px-3 py-1.5 rounded-xl bg-card border border-border text-foreground hover:bg-muted font-bold text-xs inline-flex items-center gap-1 transition"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5 text-amber-500" /> Negotiation Q&A
+                        </button>
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Main Quotations Table */}
-      <div className="glass-panel rounded-2xl p-5 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">My Quotations & Pipeline</h2>
-          <span className="text-xs text-muted-foreground font-semibold">{quotations.length} Deals Total</span>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
+      )}
 
-        {loading ? (
-          <p className="text-xs text-muted-foreground py-6 text-center">Loading quotations...</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-foreground">
-              <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
-                <tr>
-                  <th className="p-3">Quote ID</th>
-                  <th className="p-3">Customer</th>
-                  <th className="p-3">Total Value</th>
-                  <th className="p-3">Risk Level</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border bg-card">
-                {quotations.map((q) => (
-                  <tr key={q._id} className="hover:bg-muted/50 transition">
-                    <td className="p-3 font-bold text-foreground">{q.quoteNumber}</td>
-                    <td className="p-3">
-                      <p className="font-bold text-foreground">{q.customer?.company}</p>
-                      <p className="text-[10px] text-muted-foreground">{q.customer?.name} ({q.customer?.tier})</p>
-                    </td>
-                    <td className="p-3 font-extrabold text-primary">₹{q.grandTotal?.toLocaleString()}</td>
-                    <td className="p-3">
-                      <RiskBadge level={q.riskLevel} score={q.riskScore} />
-                    </td>
-                    <td className="p-3">
+      {/* TAB 4: NEGOTIATIONS */}
+      {activeTab === 'negotiations' && (
+        <div className="glass-panel rounded-2xl p-6 space-y-6 border-l-4 border-l-amber-500">
+          <div className="border-b border-border pb-4">
+            <h2 className="text-base font-extrabold text-foreground flex items-center gap-2">
+              <MessageSquare className="w-5 h-5 text-amber-500" />
+              Customer Discount Negotiations
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Evaluate customer counter-discount requests against dynamically calculated tier & category limits</p>
+          </div>
+
+          {negotiations.length === 0 ? (
+            <div className="p-8 text-center bg-card rounded-xl border border-border">
+              <p className="text-xs font-bold text-muted-foreground">No customer negotiation threads found.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {negotiations.map((neg) => {
+                const q = neg.quotation;
+                if (!q) return null;
+                const isPendingManager = neg.status === 'PENDING_MANAGER_APPROVAL' || q.status === 'Pending Approval';
+                const isLowRisk = q.riskLevel === 'LOW' && q.riskScore < 30;
+
+                return (
+                  <div key={neg._id} className="p-4 rounded-xl bg-card border border-border space-y-3 shadow-sm hover:border-amber-500/50 transition">
+                    <div className="flex items-center justify-between border-b border-border pb-2">
+                      <div>
+                        <span className="text-xs font-bold text-primary">{q.quoteNumber}</span>
+                        <p className="text-[11px] text-muted-foreground font-semibold">Customer: {neg.customer?.company || neg.customer?.name}</p>
+                      </div>
                       <StatusBadge status={q.status} />
-                    </td>
-                    <td className="p-3 text-right space-x-2">
+                    </div>
+
+                    <div className="space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between bg-muted/50 p-2 rounded-lg">
+                        <span className="text-muted-foreground">Customer Proposed Discount:</span>
+                        <span className="font-extrabold text-amber-500">{neg.currentRequestedDiscount || 0}%</span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Risk Level & Score:</span>
+                        <RiskBadge level={q.riskLevel} score={q.riskScore} />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-border">
                       <button
                         onClick={() => setActiveNegotiationId(q._id)}
-                        className="px-2.5 py-1.5 rounded-lg bg-muted border border-border text-foreground hover:bg-card font-semibold text-[11px] inline-flex items-center gap-1 transition shadow-sm"
+                        className="px-3 py-1.5 rounded-lg bg-muted border border-border text-foreground hover:bg-card font-bold text-xs inline-flex items-center gap-1.5 transition"
                       >
-                        <MessageSquare className="w-3.5 h-3.5 text-primary" /> Q&A Thread
+                        <MessageSquare className="w-3.5 h-3.5 text-primary" /> View Thread
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+                      {isPendingManager ? (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                          Waiting for Sales Manager
+                        </span>
+                      ) : isLowRisk ? (
+                        <button
+                          onClick={() => handleAcceptNegotiationDirectly(q._id)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
+                        >
+                          <CheckCircle className="w-3.5 h-3.5" /> Accept Counter-Offer
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleEscalateNegotiationToManager(q._id)}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
+                        >
+                          <ArrowRight className="w-3.5 h-3.5" /> Send to Sales Manager
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: PROFILE */}
+      {activeTab === 'profile' && (
+        <div className="glass-panel rounded-2xl p-6 space-y-6">
+          <div className="border-b border-border pb-4">
+            <h2 className="text-base font-extrabold text-foreground flex items-center gap-2">
+              <UserCheck className="w-5 h-5 text-primary" />
+              Sales Representative Profile
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">Your official employee account and assigned workload capacity</p>
           </div>
-        )}
-      </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="p-5 rounded-2xl bg-card border border-border space-y-3 text-xs">
+              <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider mb-2">Employee Account Info</h3>
+              <p><span className="text-muted-foreground font-semibold">Role:</span> <strong className="text-primary uppercase">Sales Representative</strong></p>
+              <p><span className="text-muted-foreground font-semibold">Assigned Customer Requests:</span> <strong className="text-foreground">{customerRequests.length} Requests</strong></p>
+              <p><span className="text-muted-foreground font-semibold">Active Deals in Pipeline:</span> <strong className="text-foreground">{quotations.length} Quotations</strong></p>
+            </div>
+
+            <div className="p-5 rounded-2xl bg-card border border-border space-y-3 text-xs">
+              <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider mb-2">Workload Balancing Algorithm</h3>
+              <p className="text-muted-foreground">New customer product requests are automatically assigned to your account when your active workload count is lowest among team representatives.</p>
+              <div className="pt-2">
+                <span className="text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/30">
+                  Least-Workload Assignment Engine Active
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW CUSTOMER REQUEST DETAIL MODAL */}
+      {selectedRequestModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 text-left max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
+                  <ShoppingCart className="w-4 h-4 text-primary" />
+                  Product Request ({selectedRequestModal.requestNumber})
+                </h3>
+                <p className="text-xs text-muted-foreground">Submitted by {selectedRequestModal.customer?.company || selectedRequestModal.customer?.name}</p>
+              </div>
+              <button
+                onClick={() => setSelectedRequestModal(null)}
+                className="text-xs font-bold text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <span className="font-bold text-muted-foreground">Customer Email:</span>
+                <p className="font-semibold text-foreground">{selectedRequestModal.customer?.email}</p>
+              </div>
+
+              <div>
+                <span className="font-bold text-muted-foreground">Requested Products & Quantities:</span>
+                <div className="space-y-1 mt-1">
+                  {selectedRequestModal.items?.map((item, idx) => (
+                    <div key={idx} className="p-2.5 rounded-xl bg-muted/60 border border-border flex items-center justify-between">
+                      <span className="font-bold text-foreground">{item.quantity}x {item.product?.name || 'Product'}</span>
+                      <span className="font-bold text-primary">Desired Discount: {item.desiredDiscountPercent}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {selectedRequestModal.message && (
+                <div>
+                  <span className="font-bold text-muted-foreground">Customer Message:</span>
+                  <p className="p-2.5 rounded-xl bg-muted/40 text-foreground italic border border-border mt-1">"{selectedRequestModal.message}"</p>
+                </div>
+              )}
+
+              <div className="p-3 rounded-xl bg-card border border-border flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-muted-foreground">Risk Level & Score:</span>
+                  <p className="font-extrabold text-foreground">{selectedRequestModal.riskLevel || 'LOW'} (Score: {selectedRequestModal.riskScore || 0})</p>
+                </div>
+                <RiskBadge level={selectedRequestModal.riskLevel} score={selectedRequestModal.riskScore} />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <button
+                onClick={() => setSelectedRequestModal(null)}
+                className="px-4 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground font-bold text-xs transition"
+              >
+                Close
+              </button>
+              {selectedRequestModal.status !== 'Quoted' && (
+                <button
+                  onClick={() => {
+                    const reqId = selectedRequestModal._id;
+                    setSelectedRequestModal(null);
+                    handleCreateQuotationFromRequest(reqId);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-primary text-white font-bold text-xs shadow flex items-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" /> Create Quotation
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIEW QUOTATION DETAIL MODAL */}
+      {selectedQuotationView && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-primary" />
+                  Quotation Detail ({selectedQuotationView.quoteNumber})
+                </h3>
+                <p className="text-xs text-muted-foreground">Customer: {selectedQuotationView.customer?.company || selectedQuotationView.customer?.name}</p>
+              </div>
+              <button
+                onClick={() => setSelectedQuotationView(null)}
+                className="text-xs font-bold text-muted-foreground hover:text-foreground"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
+                    <tr>
+                      <th className="p-2.5">Product</th>
+                      <th className="p-2.5">Qty</th>
+                      <th className="p-2.5">Unit Price</th>
+                      <th className="p-2.5">Discount %</th>
+                      <th className="p-2.5 text-right">Line Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {selectedQuotationView.items?.map((item, idx) => (
+                      <tr key={idx}>
+                        <td className="p-2.5 font-bold text-foreground">{item.product?.name || 'Product'}</td>
+                        <td className="p-2.5 font-semibold">{item.quantity}</td>
+                        <td className="p-2.5 font-medium">₹{item.unitPrice?.toLocaleString()}</td>
+                        <td className="p-2.5 font-bold text-emerald-500">{item.discountPercent}%</td>
+                        <td className="p-2.5 text-right font-extrabold text-foreground">₹{item.lineTotal?.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-muted/50 p-4 rounded-xl space-y-1 text-right font-semibold">
+                <p className="text-muted-foreground">Subtotal: <span className="text-foreground">₹{selectedQuotationView.subtotal?.toLocaleString()}</span></p>
+                <p className="text-muted-foreground">GST / Tax (18%): <span className="text-foreground">₹{selectedQuotationView.tax?.toLocaleString()}</span></p>
+                <p className="text-sm font-extrabold text-primary pt-1 border-t border-border">Grand Total: ₹{selectedQuotationView.grandTotal?.toLocaleString()}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <button
+                onClick={() => setSelectedQuotationView(null)}
+                className="px-4 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground font-bold text-xs transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Modal & Negotiation Drawer */}
       <QuotationModal

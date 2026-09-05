@@ -4,7 +4,7 @@ const auditSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   action: { 
     type: String, 
-    enum: ['SUBMITTED', 'APPROVED_BY_MANAGER', 'APPROVED_BY_FINANCE', 'REJECTED', 'RETURNED_FOR_CHANGES', 'CUSTOMER_COUNTER'], 
+    enum: ['SUBMITTED', 'APPROVED_BY_MANAGER', 'APPROVED_BY_FINANCE', 'REJECTED', 'RETURNED_FOR_CHANGES', 'CUSTOMER_COUNTER', 'ESCALATED', 'REOPENED'], 
     required: true 
   },
   timestamp: { type: Date, default: Date.now },
@@ -14,7 +14,12 @@ const auditSchema = new mongoose.Schema({
 
 const approvalSchema = new mongoose.Schema({
   quotation: { type: mongoose.Schema.Types.ObjectId, ref: 'Quotation', required: true },
+  customerRequest: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerRequest', default: null },
+  negotiation: { type: mongoose.Schema.Types.ObjectId, ref: 'Negotiation', default: null },
+  customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
   salesRep: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  requestedDiscount: { type: Number, default: 0 },
+  allowedDiscount: { type: Number, default: 0 },
   currentStep: { 
     type: String, 
     enum: ['SALES_MANAGER', 'FINANCE_OPERATIONS', 'COMPLETED', 'REJECTED'], 

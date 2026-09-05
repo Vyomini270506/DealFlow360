@@ -5,6 +5,7 @@ const {
   getQuotationById, 
   createQuotation, 
   submitQuotation,
+  sendQuotation,
   acceptQuotation,
   rejectQuotation 
 } = require('../controllers/quotationController');
@@ -16,6 +17,7 @@ router.route('/')
 
 router.get('/:id', protect, getQuotationById);
 router.post('/:id/submit', protect, submitQuotation);
+router.post('/:id/send', protect, sendQuotation);
 router.post('/:id/accept', protect, acceptQuotation);
 router.post('/:id/reject', protect, rejectQuotation);
 

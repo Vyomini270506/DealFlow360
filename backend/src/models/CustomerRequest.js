@@ -17,10 +17,13 @@ const customerRequestSchema = new mongoose.Schema({
     type: String,
     enum: [
       'Pending',
+      'Submitted',
+      'Processing',
       'In Review',
       'Escalated_Manager',
       'Approved_Manager',
       'Rejected_Manager',
+      'Quotation Sent',
       'Quoted',
       'Completed',
       'Cancelled'

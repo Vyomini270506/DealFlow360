@@ -30,10 +30,11 @@ const Sidebar = () => {
     switch (role) {
       case 'SALES_REP':
         return [
-          { name: 'Dashboard', path: '/sales-rep', icon: LayoutDashboard },
-          { name: 'My Quotations', path: '/quotations', icon: FileText },
-          { name: 'Customer Negotiations', path: '/negotiations', icon: MessageSquare },
-          { name: 'Fulfillment Status', path: '/fulfillment', icon: Truck },
+          { name: 'Dashboard', path: '/sales-rep?tab=dashboard', icon: LayoutDashboard },
+          { name: 'Customer Requests', path: '/sales-rep?tab=requests', icon: ShoppingCart },
+          { name: 'Quotations', path: '/sales-rep?tab=quotations', icon: FileText },
+          { name: 'Negotiations', path: '/sales-rep?tab=negotiations', icon: MessageSquare },
+          { name: 'Profile', path: '/sales-rep?tab=profile', icon: UserCheck },
         ];
       case 'SALES_MANAGER':
         return [

@@ -27,41 +27,38 @@ const createCustomerRequest = async (req, res) => {
       return res.status(400).json({ message: 'Product request must contain at least one item' });
     }
 
-    // 2. Automatic Least-Workload Sales Representative Assignment Algorithm
+    // 2. Automatic Least-Workload Sales Representative Assignment Algorithm among Sales Rep A, Sales Rep B, Sales Rep C
+    const salesReps = await User.find({ role: 'SALES_REP' });
+    if (!salesReps || salesReps.length === 0) {
+      return res.status(500).json({ message: 'No active Sales Representatives available for assignment' });
+    }
+
+    const activeStatuses = ['Pending', 'Submitted', 'Processing', 'In Review', 'Escalated_Manager', 'Approved_Manager', 'Quotation Sent', 'Quoted'];
     let selectedRep = null;
-    if (customerDoc.assignedSalesRepresentative) {
-      selectedRep = await User.findById(customerDoc.assignedSalesRepresentative);
+    let minWorkload = Infinity;
+
+    for (const rep of salesReps) {
+      const activeCount = await CustomerRequest.countDocuments({
+        assignedSalesRep: rep._id,
+        status: { $in: activeStatuses }
+      });
+
+      if (activeCount < minWorkload) {
+        minWorkload = activeCount;
+        selectedRep = rep;
+      }
     }
 
     if (!selectedRep) {
-      const salesReps = await User.find({ role: 'SALES_REP' });
-      if (!salesReps || salesReps.length === 0) {
-        return res.status(500).json({ message: 'No active Sales Representatives available for assignment' });
-      }
-
-      const activeStatuses = ['Pending', 'In Review', 'Escalated_Manager', 'Escalated_Finance'];
-      let minWorkload = Infinity;
-
-      for (const rep of salesReps) {
-        const activeCount = await CustomerRequest.countDocuments({
-          assignedSalesRep: rep._id,
-          status: { $in: activeStatuses }
-        });
-
-        if (activeCount < minWorkload) {
-          minWorkload = activeCount;
-          selectedRep = rep;
-        }
-      }
-
-      if (selectedRep) {
-        customerDoc.assignedSalesRepresentative = selectedRep._id;
-        customerDoc.assignedSalesManager = selectedRep.salesManagerId || null;
-        customerDoc.assignmentStatus = 'REP_ASSIGNED';
-        customerDoc.assignedAt = new Date();
-        await customerDoc.save();
-      }
+      return res.status(500).json({ message: 'Failed to assign Sales Representative' });
     }
+
+    // Keep Customer document linked to the newly assigned Sales Rep and Manager
+    customerDoc.assignedSalesRepresentative = selectedRep._id;
+    customerDoc.assignedSalesManager = selectedRep.salesManagerId || null;
+    customerDoc.assignmentStatus = 'REP_ASSIGNED';
+    customerDoc.assignedAt = new Date();
+    await customerDoc.save();
 
     // 3. Generate Request Number
     const requestCount = await CustomerRequest.countDocuments();
@@ -164,6 +161,36 @@ const getCustomerRequests = async (req, res) => {
       .sort('-createdAt');
 
     res.json(requests);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Get Customer Product Request by ID with strict ownership validation
+// @route GET /api/customer-requests/:id
+const getCustomerRequestById = async (req, res) => {
+  try {
+    const request = await CustomerRequest.findById(req.params.id)
+      .populate('customer', 'name company tier email')
+      .populate('assignedSalesRep', 'name email role phone')
+      .populate('items.product', 'name category unitPrice sku');
+
+    if (!request) {
+      return res.status(404).json({ message: 'Customer request not found' });
+    }
+
+    if (req.user.role === 'CUSTOMER') {
+      const userCustId = req.user.customerId?._id ? req.user.customerId._id.toString() : req.user.customerId?.toString();
+      if (!userCustId || request.customer._id.toString() !== userCustId) {
+        return res.status(403).json({ message: 'Not authorized to access this customer request' });
+      }
+    } else if (req.user.role === 'SALES_REP') {
+      if (request.assignedSalesRep && request.assignedSalesRep._id.toString() !== req.user._id.toString()) {
+        return res.status(403).json({ message: 'Not authorized to access this customer request' });
+      }
+    }
+
+    res.json(request);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -315,6 +342,7 @@ const createQuotationFromRequest = async (req, res) => {
 module.exports = {
   createCustomerRequest,
   getCustomerRequests,
+  getCustomerRequestById,
   escalateToManager,
   managerAction,
   createQuotationFromRequest
