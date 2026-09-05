@@ -153,6 +153,10 @@ const addNegotiationMessage = async (req, res) => {
       return res.status(404).json({ message: 'Quotation not found' });
     }
 
+    if (quotation.status === 'Closed' || quotation.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
+    }
+
     let negotiation = await Negotiation.findOne({ quotation: quotation._id });
     if (!negotiation) {
       negotiation = new Negotiation({
@@ -162,6 +166,10 @@ const addNegotiationMessage = async (req, res) => {
         status: 'Open',
         messages: []
       });
+    }
+
+    if (negotiation.status === 'Closed' || negotiation.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
     }
 
     negotiation.messages.push({
@@ -377,7 +385,7 @@ const reopenNegotiation = async (req, res) => {
 };
 
 
-// @desc Sales Representative accepts a low-risk negotiation counter-offer directly
+// @desc Accept negotiation terms (Requires dual confirmation: Both Customer AND Sales Rep must confirm)
 // @route POST /api/negotiations/quotation/:quotationId/accept
 const acceptNegotiation = async (req, res) => {
   try {
@@ -386,44 +394,97 @@ const acceptNegotiation = async (req, res) => {
       return res.status(404).json({ message: 'Quotation not found' });
     }
 
-    if (req.user.role === 'SALES_REP' && quotation.salesRep && quotation.salesRep.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized to accept negotiation on this quotation' });
-    }
-
     let negotiation = await Negotiation.findOne({ quotation: quotation._id });
     if (!negotiation) {
       return res.status(404).json({ message: 'Negotiation thread not found' });
     }
 
-    // Dynamic Discount Authority Check via discountValidator
-    const { totalBreaches, breachSummary, tierLimit } = await validateQuotationDiscounts(quotation.items, quotation.customer);
-
-    if (totalBreaches > 0 || quotation.riskLevel === 'HIGH' || quotation.riskScore >= 60) {
-      return res.status(400).json({ 
-        message: `Proposed counter discount exceeds allowed authority limit (${tierLimit}%). Must send to Sales Manager for approval.` 
-      });
+    if (negotiation.status === 'Closed' || quotation.status === 'Closed') {
+      return res.status(400).json({ message: 'Negotiation is already closed and finalized.' });
     }
 
-    quotation.status = 'Confirmed';
-    quotation.approvalChainState = 'APPROVED';
-    quotation.acceptedBy = req.user._id;
-    quotation.acceptedAt = new Date();
+    // Check authority if Sales Rep accepting
+    if (req.user.role === 'SALES_REP') {
+      const { totalBreaches, tierLimit } = await validateQuotationDiscounts(quotation.items, quotation.customer);
+      if (totalBreaches > 0 || quotation.riskLevel === 'HIGH' || quotation.riskScore >= 60) {
+        return res.status(400).json({
+          message: `Proposed counter discount exceeds allowed authority limit (${tierLimit}%). Must send to Sales Manager for approval.`
+        });
+      }
+      negotiation.salesRepConfirmation = { status: 'CONFIRMED', confirmedAt: new Date() };
+    } else if (req.user.role === 'CUSTOMER') {
+      negotiation.customerConfirmation = { status: 'CONFIRMED', confirmedAt: new Date() };
+    } else {
+      // Admin/Manager can confirm on behalf of both
+      negotiation.salesRepConfirmation = { status: 'CONFIRMED', confirmedAt: new Date() };
+      negotiation.customerConfirmation = { status: 'CONFIRMED', confirmedAt: new Date() };
+    }
 
-    negotiation.status = 'Accepted';
-    negotiation.approvedBy = req.user._id;
-    negotiation.approvedAt = new Date();
-    
-    negotiation.messages.push({
-      sender: req.user._id,
-      senderRole: req.user.role,
-      message: 'Sales Representative accepted counter-offer negotiation proposal.',
-      timestamp: new Date()
-    });
+    const isCustomerConfirmed = negotiation.customerConfirmation?.status === 'CONFIRMED';
+    const isRepConfirmed = negotiation.salesRepConfirmation?.status === 'CONFIRMED';
 
-    await quotation.save();
-    await negotiation.save();
+    if (isCustomerConfirmed && isRepConfirmed) {
+      // BOTH SIDES CONFIRMED: Finalize deal & close all related negotiations!
+      quotation.status = 'Closed';
+      quotation.approvalChainState = 'APPROVED';
+      quotation.acceptedBy = req.user._id;
+      quotation.acceptedAt = new Date();
+      await quotation.save();
 
-    res.json({ message: 'Negotiation accepted successfully!', quotation, negotiation });
+      const CustomerRequest = require('../models/CustomerRequest');
+      if (quotation.customerRequest) {
+        await CustomerRequest.findByIdAndUpdate(quotation.customerRequest, { status: 'Closed' });
+      }
+
+      negotiation.status = 'Closed';
+      negotiation.approvedBy = req.user._id;
+      negotiation.approvedAt = new Date();
+
+      negotiation.messages.push({
+        sender: req.user._id,
+        senderRole: req.user.role,
+        message: '🎉 DUAL CONFIRMATION COMPLETED! Deal terms finalized & negotiation CLOSED.',
+        timestamp: new Date()
+      });
+      await negotiation.save();
+
+      // Close ALL negotiations associated with this same quotation / request
+      const filterConditions = [];
+      if (quotation._id) filterConditions.push({ quotation: quotation._id });
+      if (quotation.customerRequest) filterConditions.push({ customerRequest: quotation.customerRequest });
+
+      if (filterConditions.length > 0) {
+        await Negotiation.updateMany(
+          { $or: filterConditions },
+          { $set: { status: 'Closed' } }
+        );
+      }
+
+      return res.json({
+        message: 'Deal finalized & CLOSED successfully! Dual confirmation completed by both Customer and Sales Rep.',
+        quotation,
+        negotiation,
+        isClosed: true
+      });
+    } else {
+      // ONLY ONE SIDE HAS CONFIRMED YET: Keep negotiation active, ask for other party's confirmation!
+      negotiation.status = 'Active';
+      const waitingRole = isCustomerConfirmed ? 'Sales Representative' : 'Customer';
+      negotiation.messages.push({
+        sender: req.user._id,
+        senderRole: req.user.role,
+        message: `${req.user.role === 'CUSTOMER' ? 'Customer' : 'Sales Representative'} confirmed terms. Waiting for ${waitingRole} to confirm to finalize deal.`,
+        timestamp: new Date()
+      });
+      await negotiation.save();
+
+      return res.json({
+        message: `Your confirmation saved! Waiting for ${waitingRole} to confirm to finalize the deal.`,
+        quotation,
+        negotiation,
+        isClosed: false
+      });
+    }
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -586,6 +647,10 @@ const addNegotiationMessageById = async (req, res) => {
       return res.status(404).json({ message: 'Negotiation thread not found' });
     }
 
+    if (negotiation.status === 'Closed' || negotiation.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
+    }
+
     negotiation.messages.push({
       sender: req.user._id,
       senderRole: req.user.role,
@@ -711,5 +776,5 @@ module.exports = {
   reopenNegotiation,
   acceptNegotiation,
   escalateNegotiationToManager
-};
+}
 

@@ -31,7 +31,9 @@ const customerRequestSchema = new mongoose.Schema({
       'Quotation Sent',
       'Quoted',
       'Completed',
-      'Cancelled'
+      'Cancelled',
+      'Closed',
+      'DISCARDED'
     ],
     default: 'Pending'
   },

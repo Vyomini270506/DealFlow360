@@ -223,6 +223,10 @@ const submitQuotation = async (req, res) => {
       return res.status(404).json({ message: 'Quotation not found' });
     }
 
+    if (quotation.status === 'Closed' || quotation.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
+    }
+
     // Re-evaluate risk score & discount validator
     const { totalBreaches } = await validateQuotationDiscounts(quotation.items, quotation.customer);
     const riskAnalysis = await calculateRiskScore({
@@ -301,6 +305,14 @@ const submitQuotation = async (req, res) => {
 
     await approval.save();
 
+    // NOTIFY SALES MANAGER OF REP SUBMISSION
+    const { notifyManagersForRepAction } = require('../utils/notificationHelper');
+    await notifyManagersForRepAction({
+      repId: req.user._id,
+      title: 'Quotation Submitted for Approval',
+      message: `Sales Representative ${req.user.name || 'Rep'} submitted Quotation ${quotation.quoteNumber} for Sales Manager signoff.`
+    });
+
     res.json({ quotation, approval });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -314,6 +326,10 @@ const acceptQuotation = async (req, res) => {
     const quotation = await Quotation.findById(req.params.id);
     if (!quotation) {
       return res.status(404).json({ message: 'Quotation not found' });
+    }
+
+    if (quotation.status === 'Closed' || quotation.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
     }
 
     if (req.user.role === 'CUSTOMER') {
@@ -344,6 +360,10 @@ const rejectQuotation = async (req, res) => {
 
     if (!quotation) {
       return res.status(404).json({ message: 'Quotation not found' });
+    }
+
+    if (quotation.status === 'Closed' || quotation.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
     }
 
     if (req.user.role === 'CUSTOMER') {
@@ -377,6 +397,10 @@ const sendQuotation = async (req, res) => {
       return res.status(404).json({ message: 'Quotation not found' });
     }
 
+    if (quotation.status === 'Closed' || quotation.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
+    }
+
     if (req.user.role === 'SALES_REP') {
       if (quotation.salesRep && quotation.salesRep.toString() !== req.user._id.toString()) {
         return res.status(403).json({ message: 'Not authorized to send this quotation' });
@@ -399,7 +423,33 @@ const sendQuotation = async (req, res) => {
       await CustomerRequest.findByIdAndUpdate(quotation.customerRequest, { status: 'Quoted' });
     }
 
+    // NOTIFY SALES MANAGER AND CUSTOMER OF QUOTATION SENT
+    const { notifyManagersForRepAction, notifyCustomerAndRepOnManagerAction } = require('../utils/notificationHelper');
+    await notifyManagersForRepAction({
+      repId: req.user._id,
+      title: 'Quotation Issued to Customer',
+      message: `Sales Representative ${req.user.name || 'Rep'} issued Quotation ${quotation.quoteNumber} to Customer.`
+    });
+
     res.json({ message: 'Quotation sent to Customer successfully!', quotation });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Discard/Soft Delete Quotation (Available for Customer, Rep, Manager, Finance, Admin)
+// @route POST /api/quotations/:id/discard
+const discardQuotation = async (req, res) => {
+  try {
+    const quotation = await Quotation.findById(req.params.id);
+    if (!quotation) {
+      return res.status(404).json({ message: 'Quotation not found' });
+    }
+
+    quotation.status = 'DISCARDED';
+    await quotation.save();
+
+    res.json({ message: 'Quotation discarded successfully and moved to Discarded Records', quotation });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -412,5 +462,6 @@ module.exports = {
   submitQuotation,
   sendQuotation,
   acceptQuotation,
-  rejectQuotation
+  rejectQuotation,
+  discardQuotation
 };

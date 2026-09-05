@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import { toast } from 'sonner';
-import { X, Send, MessageSquare, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { X, Send, MessageSquare, AlertTriangle, ShieldCheck, CheckCircle2, Clock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequestId, onClose, onSuccess }) => {
@@ -68,21 +68,22 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
     }
   };
 
-  const handleAcceptNegotiation = async () => {
+  const handleConfirmDealTerms = async () => {
     if (!negotiation?._id) return;
     try {
-      if (negotiation.quotation?._id) {
-        await API.post(`/negotiations/quotation/${negotiation.quotation._id}/accept`);
+      const quoteId = negotiation.quotation?._id || negotiation.quotation;
+      const { data } = await API.post(`/negotiations/quotation/${quoteId}/accept`);
+      
+      if (data.isClosed) {
+        toast.success('🎉 Deal finalized & CLOSED! Dual confirmation completed.');
       } else {
-        await API.post(`/negotiations/${negotiation._id}/message`, {
-          message: `Negotiation accepted terms by ${user.role}`
-        });
+        toast.info(data.message || 'Your confirmation saved! Waiting for counterparty confirmation.');
       }
-      toast.success('Negotiation accepted successfully!');
+      
       fetchNegotiation();
       if (onSuccess) onSuccess();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to accept negotiation');
+      toast.error(err.response?.data?.message || 'Failed to confirm negotiation');
     }
   };
 
@@ -154,6 +155,12 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
   const riskLevel = quotation?.riskLevel ?? customerRequest?.riskLevel ?? 'LOW';
   const isLowRisk = riskLevel === 'LOW' && riskScore < 30;
   const isPendingManager = negotiation?.status === 'PENDING_MANAGER_APPROVAL' || quotation?.status === 'Pending Approval' || customerRequest?.status === 'Negotiation_Required';
+  const isDealClosed = negotiation?.status === 'Closed' || quotation?.status === 'Closed';
+
+  const isCustomerConfirmed = negotiation?.customerConfirmation?.status === 'CONFIRMED';
+  const isRepConfirmed = negotiation?.salesRepConfirmation?.status === 'CONFIRMED';
+
+  const userHasConfirmed = user.role === 'CUSTOMER' ? isCustomerConfirmed : isRepConfirmed;
 
   const refNumber = quotation?.quoteNumber || customerRequest?.requestNumber || 'Negotiation';
   const customerName = negotiation?.customer?.name || negotiation?.customer?.company || 'Customer';
@@ -181,6 +188,55 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
 
         {/* Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
+
+          {/* DUAL CONFIRMATION STATUS CARD */}
+          <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span className="text-xs font-extrabold text-white flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Dual Confirmation Status
+              </span>
+              {isDealClosed ? (
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  DEAL CLOSED & FINALIZED ✓
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  NEGOTIATION ACTIVE
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                <p className="text-[10px] text-slate-400 font-semibold">Customer Confirmation</p>
+                <p className={`font-bold mt-0.5 ${isCustomerConfirmed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {isCustomerConfirmed ? 'CONFIRMED ✓' : 'PENDING ⏳'}
+                </p>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                <p className="text-[10px] text-slate-400 font-semibold">Sales Rep Confirmation</p>
+                <p className={`font-bold mt-0.5 ${isRepConfirmed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {isRepConfirmed ? 'CONFIRMED ✓' : 'PENDING ⏳'}
+                </p>
+              </div>
+            </div>
+
+            {!isDealClosed && !userHasConfirmed && (
+              <button
+                onClick={handleConfirmDealTerms}
+                className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-md transition flex items-center justify-center gap-2"
+              >
+                <CheckCircle2 className="w-4 h-4" /> [ Confirm & Accept Deal Terms ]
+              </button>
+            )}
+
+            {!isDealClosed && userHasConfirmed && (
+              <p className="text-[11px] text-emerald-400 font-semibold text-center italic bg-emerald-950/40 p-2 rounded-lg border border-emerald-800/40">
+                ✓ You have confirmed the deal terms. Waiting for counterparty confirmation to finalize & close.
+              </p>
+            )}
+          </div>
 
           {/* Sales Manager Instruction Banner */}
           {customerRequest?.managerComment && (
@@ -218,34 +274,6 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
                 </span>
               )}
             </div>
-
-            {/* Action Buttons for Sales Rep */}
-            {user.role === 'SALES_REP' && (
-              <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
-                {isLowRisk && !isPendingManager && quotation?.status !== 'Confirmed' && (
-                  <button
-                    onClick={handleAcceptNegotiation}
-                    className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition"
-                  >
-                    [ Accept Negotiation ]
-                  </button>
-                )}
-
-                {(!isLowRisk || isPendingManager) && quotation?.status !== 'Confirmed' && (
-                  <button
-                    onClick={handleEscalateToManager}
-                    disabled={isPendingManager}
-                    className={`flex-1 py-2 rounded-xl font-bold text-xs transition ${
-                      isPendingManager
-                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                        : 'bg-amber-500 hover:bg-amber-600 text-slate-950 shadow'
-                    }`}
-                  >
-                    {isPendingManager ? 'WAITING FOR SALES MANAGER APPROVAL' : '[ SEND TO SALES MANAGER ]'}
-                  </button>
-                )}
-              </div>
-            )}
           </div>
           
           {/* Item Selector Tabs */}
@@ -267,7 +295,7 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
                     <div>
                       <p className="text-xs font-bold">{item.product?.name || `Product #${idx + 1}`}</p>
                       <p className="text-[11px] text-slate-400">
-                        Qty: {item.quantity} | Current Discount: <span className="font-bold text-amber-400">{item.discountPercent || item.desiredDiscountPercent || 0}%</span>
+                        Qty: {item.quantity} | Discount: <span className="font-bold text-amber-400">{item.discountPercent || item.desiredDiscountPercent || 0}%</span>
                       </p>
                     </div>
                     {item.lineTotal && (
@@ -331,39 +359,47 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
         </div>
 
         {/* Input Footer */}
-        <form onSubmit={handleSendMessage} className="p-4 border-t border-slate-800 bg-slate-950 space-y-3">
-          <div>
-            <label className="block text-[11px] font-semibold text-amber-400 mb-1">
-              Propose Counter Discount % (Optional)
-            </label>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              value={counterDiscount}
-              onChange={(e) => setCounterDiscount(e.target.value)}
-              placeholder="e.g. 15"
-              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-amber-300 font-bold placeholder-slate-600 focus:border-amber-500 focus:outline-none"
-            />
+        {isDealClosed ? (
+          <div className="p-4 border-t border-slate-800 bg-slate-950 text-center">
+            <p className="text-xs font-bold text-emerald-400 flex items-center justify-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4" /> This negotiation is CLOSED. Chat is read-only.
+            </p>
           </div>
+        ) : (
+          <form onSubmit={handleSendMessage} className="p-4 border-t border-slate-800 bg-slate-950 space-y-3">
+            <div>
+              <label className="block text-[11px] font-semibold text-amber-400 mb-1">
+                Propose Counter Discount % (Optional)
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={counterDiscount}
+                onChange={(e) => setCounterDiscount(e.target.value)}
+                placeholder="e.g. 15"
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-amber-300 font-bold placeholder-slate-600 focus:border-amber-500 focus:outline-none"
+              />
+            </div>
 
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Type your question or negotiation comment..."
-              className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={sending}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
-            >
-              <Send className="w-3.5 h-3.5" /> Send
-            </button>
-          </div>
-        </form>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder="Type your question or negotiation comment..."
+                className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-indigo-500 focus:outline-none"
+              />
+              <button
+                type="submit"
+                disabled={sending}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition"
+              >
+                <Send className="w-3.5 h-3.5" /> Send
+              </button>
+            </div>
+          </form>
+        )}
 
       </div>
     </div>

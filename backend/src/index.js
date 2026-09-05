@@ -27,6 +27,7 @@ app.use('/api/analytics', require('./routes/analyticsRoutes'));
 app.use('/api/assignments', require('./routes/assignmentRoutes'));
 app.use('/api/customer-requests', require('./routes/customerRequestRoutes'));
 app.use('/api/messages', require('./routes/messageRoutes'));
+app.use('/api/notifications', require('./routes/notificationRoutes'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -44,6 +45,20 @@ app.post('/api/seed', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Serve static frontend assets if build directory exists
+const path = require('path');
+const frontendDist = path.join(__dirname, '../../frontend/dist');
+app.use(express.static(frontendDist));
+
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  res.sendFile(path.join(frontendDist, 'index.html'), (err) => {
+    if (err) {
+      res.status(200).send('DealFlow360 API Server Running.');
+    }
+  });
 });
 
 const PORT = process.env.PORT || 5000;

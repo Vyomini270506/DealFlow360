@@ -16,7 +16,8 @@ import {
   RefreshCw,
   Search,
   Eye,
-  FileText
+  FileText,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -130,19 +131,32 @@ const SalesManagerDashboard = () => {
     }
   };
 
+  const handleDiscardRequest = async (requestId) => {
+    try {
+      await API.post(`/customer-requests/${requestId}/discard`);
+      toast.info('Request discarded and moved to Discarded Records.');
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to discard request');
+    }
+  };
+
   // Metrics Calculations
-  const pendingRequests = customerRequests.filter(r => r.status === 'Escalated_Manager' || r.status === 'Pending' || r.status === 'Submitted');
+  const closedCount = customerRequests.filter(r => r.status === 'Closed' || r.status === 'CLOSED').length;
+  const pendingRequests = customerRequests.filter(r => (r.status === 'Escalated_Manager' || r.status === 'Pending' || r.status === 'Submitted') && r.status !== 'Closed' && r.status !== 'CLOSED');
   const pendingApprovalsList = approvals.filter(a => a.managerApproval?.status === 'PENDING');
   const totalPending = pendingRequests.length + pendingApprovalsList.length;
 
-  const mediumRiskCount = customerRequests.filter(r => r.riskLevel === 'MEDIUM').length + approvals.filter(a => a.riskLevel === 'MEDIUM').length;
-  const highRiskCount = customerRequests.filter(r => r.riskLevel === 'HIGH').length + approvals.filter(a => a.riskLevel === 'HIGH').length;
+  const mediumRiskCount = customerRequests.filter(r => r.riskLevel === 'MEDIUM' && r.status !== 'Closed' && r.status !== 'CLOSED').length + approvals.filter(a => a.riskLevel === 'MEDIUM').length;
+  const highRiskCount = customerRequests.filter(r => r.riskLevel === 'HIGH' && r.status !== 'Closed' && r.status !== 'CLOSED').length + approvals.filter(a => a.riskLevel === 'HIGH').length;
 
-  const approvedCount = customerRequests.filter(r => r.status === 'Approved_Manager' || r.status === 'Quoted').length + approvals.filter(a => a.managerApproval?.status === 'APPROVED').length;
+  const approvedCount = customerRequests.filter(r => (r.status === 'Approved_Manager' || r.status === 'Quoted') && r.status !== 'Closed' && r.status !== 'CLOSED').length + approvals.filter(a => a.managerApproval?.status === 'APPROVED').length;
   const rejectedCount = customerRequests.filter(r => r.status === 'Rejected_Manager').length + approvals.filter(a => a.managerApproval?.status === 'REJECTED').length;
 
   // Filtered Requests Queue
   const filteredRequests = customerRequests.filter(r => {
+    if (filterStatus === 'CLOSED') return r.status === 'Closed' || r.status === 'CLOSED';
+    if (r.status === 'Closed' || r.status === 'CLOSED') return false;
     if (filterStatus === 'PENDING') return r.status === 'Escalated_Manager' || r.status === 'Pending';
     if (filterStatus === 'MEDIUM') return r.riskLevel === 'MEDIUM';
     if (filterStatus === 'HIGH') return r.riskLevel === 'HIGH';
@@ -194,8 +208,8 @@ const SalesManagerDashboard = () => {
         <div onClick={() => setFilterStatus('APPROVED')} className="cursor-pointer">
           <KPICard title="Approved Deals" value={approvedCount} subtitle="Manager approved" icon={ShieldCheck} color="emerald" />
         </div>
-        <div onClick={() => setFilterStatus('REJECTED')} className="cursor-pointer">
-          <KPICard title="Rejected Deals" value={rejectedCount} subtitle="Manager rejected" icon={XCircle} color="rose" />
+        <div onClick={() => setFilterStatus('CLOSED')} className="cursor-pointer">
+          <KPICard title="Closed Deals" value={closedCount} subtitle="Finalized & confirmed" icon={CheckCircle2} color="emerald" />
         </div>
       </div>
 
@@ -230,7 +244,7 @@ const SalesManagerDashboard = () => {
             </div>
 
             <div className="flex items-center bg-muted/60 p-1 rounded-xl border border-border text-[11px] font-bold overflow-x-auto">
-              {['ALL', 'PENDING', 'MEDIUM', 'HIGH', 'APPROVED', 'REJECTED', 'CHANGES'].map((st) => (
+              {['ALL', 'PENDING', 'MEDIUM', 'HIGH', 'APPROVED', 'REJECTED', 'CHANGES', 'CLOSED'].map((st) => (
                 <button
                   key={st}
                   onClick={() => setFilterStatus(st)}
@@ -345,6 +359,13 @@ const SalesManagerDashboard = () => {
                           <XCircle className="w-3.5 h-3.5" /> Reject
                         </button>
                       )}
+
+                      <button
+                        onClick={() => handleDiscardRequest(reqItem._id)}
+                        className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 font-bold text-xs inline-flex items-center gap-1 transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Discard
+                      </button>
                     </td>
                   </tr>
                 ))}

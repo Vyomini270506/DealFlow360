@@ -35,6 +35,14 @@ const negotiationSchema = new mongoose.Schema({
   previousDiscount: { type: Number, default: 0 },
   currentRequestedDiscount: { type: Number, default: 0 },
   rejectionReason: { type: String, default: '' },
+  customerConfirmation: {
+    status: { type: String, enum: ['PENDING', 'CONFIRMED', 'REJECTED'], default: 'PENDING' },
+    confirmedAt: { type: Date, default: null }
+  },
+  salesRepConfirmation: {
+    status: { type: String, enum: ['PENDING', 'CONFIRMED', 'REJECTED'], default: 'PENDING' },
+    confirmedAt: { type: Date, default: null }
+  },
   approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   approvedAt: { type: Date },
   messages: [messageSchema],

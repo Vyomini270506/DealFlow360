@@ -7,7 +7,8 @@ const {
   submitQuotation,
   sendQuotation,
   acceptQuotation,
-  rejectQuotation 
+  rejectQuotation,
+  discardQuotation
 } = require('../controllers/quotationController');
 const { protect } = require('../middleware/auth');
 
@@ -20,5 +21,6 @@ router.post('/:id/submit', protect, submitQuotation);
 router.post('/:id/send', protect, sendQuotation);
 router.post('/:id/accept', protect, acceptQuotation);
 router.post('/:id/reject', protect, rejectQuotation);
+router.post('/:id/discard', protect, discardQuotation);
 
 module.exports = router;

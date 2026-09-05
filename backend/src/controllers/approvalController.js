@@ -77,6 +77,11 @@ const processApprovalAction = async (req, res) => {
     const customerRequest = approval.customerRequest ? await CustomerRequest.findById(approval.customerRequest) : null;
     const quotation = approval.quotation ? await Quotation.findById(approval.quotation) : null;
 
+    if ((quotation && (quotation.status === 'Closed' || quotation.status === 'CLOSED')) || 
+        (customerRequest && (customerRequest.status === 'Closed' || customerRequest.status === 'CLOSED'))) {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
+    }
+
     // Security & Role Validation
     if (approval.currentStep === 'SALES_MANAGER') {
       if (req.user.role !== 'SALES_MANAGER' && req.user.role !== 'ADMIN') {
@@ -162,6 +167,16 @@ const processApprovalAction = async (req, res) => {
           await quotation.save();
         }
       }
+
+      // NOTIFY CUSTOMER & SALES REP
+      const { notifyCustomerAndRepOnManagerAction } = require('../utils/notificationHelper');
+      await notifyCustomerAndRepOnManagerAction({
+        customerId: approval.customer,
+        repId: approval.salesRep,
+        title: `Sales Manager Approval Action: ${action}`,
+        message: `Sales Manager ${req.user.name || ''} evaluated request/quotation approval step to '${action}'. Note: "${reason || 'Action recorded'}"`
+      });
+
     } else if (approval.currentStep === 'FINANCE_OPERATIONS') {
       if (req.user.role !== 'FINANCE_OPERATIONS' && req.user.role !== 'ADMIN') {
         return res.status(403).json({ message: 'Only Finance/Operations can perform this high-risk approval step' });
@@ -174,8 +189,11 @@ const processApprovalAction = async (req, res) => {
         approval.financeApproval.actionDate = new Date();
         approval.currentStep = 'COMPLETED';
 
-        quotation.approvalChainState = 'APPROVED';
-        quotation.status = 'Approved';
+        if (quotation) {
+          quotation.approvalChainState = 'APPROVED';
+          quotation.status = 'Approved';
+          await quotation.save();
+        }
 
         approval.auditTrail.push({
           user: req.user._id,
@@ -186,23 +204,26 @@ const processApprovalAction = async (req, res) => {
       } else if (action === 'REJECT') {
         approval.financeApproval.status = 'REJECTED';
         approval.currentStep = 'REJECTED';
-        quotation.approvalChainState = 'REJECTED';
-        quotation.status = 'Rejected';
+
+        if (quotation) {
+          quotation.approvalChainState = 'REJECTED';
+          quotation.status = 'Rejected';
+          await quotation.save();
+        }
 
         approval.auditTrail.push({
           user: req.user._id,
-          action: 'REJECTED',
+          action: 'REJECTED_BY_FINANCE',
           role: req.user.role,
           reason
         });
       }
     }
 
-    await quotation.save();
     await approval.save();
 
     // If quotation became Approved, auto-initialize Fulfillment Allocation
-    if (quotation.status === 'Approved') {
+    if (quotation && quotation.status === 'Approved') {
       await allocateFulfillmentStock(quotation);
     }
 

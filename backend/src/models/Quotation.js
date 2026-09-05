@@ -38,7 +38,9 @@ const quotationSchema = new mongoose.Schema({
       'Negotiation',
       'Confirmed',
       'Fulfillment',
-      'Completed'
+      'Completed',
+      'Closed',
+      'DISCARDED'
     ],
     default: 'Draft'
   },

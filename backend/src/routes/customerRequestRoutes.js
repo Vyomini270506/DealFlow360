@@ -10,7 +10,8 @@ const {
   financeAction,
   managerAction,
   startNegotiationFromRequest,
-  createQuotationFromRequest
+  createQuotationFromRequest,
+  discardCustomerRequest
 } = require('../controllers/customerRequestController');
 const { protect, authorizeRoles } = require('../middleware/auth');
 
@@ -26,6 +27,7 @@ router.post('/:id/finance-action', protect, authorizeRoles('FINANCE_OPERATIONS',
 router.post('/:id/manager-action', protect, authorizeRoles('SALES_MANAGER', 'ADMIN'), managerAction);
 router.post('/:id/start-negotiation', protect, authorizeRoles('SALES_REP', 'ADMIN'), startNegotiationFromRequest);
 router.post('/:id/create-quotation', protect, authorizeRoles('SALES_REP'), createQuotationFromRequest);
+router.post('/:id/discard', protect, discardCustomerRequest);
 
 module.exports = router;
 

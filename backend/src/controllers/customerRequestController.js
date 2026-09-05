@@ -224,6 +224,10 @@ const repActionOnRequest = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to act on this request' });
     }
 
+    if (request.status === 'Closed' || request.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
+    }
+
     // STRICT BACKEND ENFORCEMENT: MEDIUM & HIGH risk requests CANNOT be independently decided by Sales Rep
     if (request.riskLevel === 'MEDIUM' || request.riskLevel === 'HIGH') {
       if (action === 'APPROVE' || action === 'REJECT') {
@@ -233,15 +237,27 @@ const repActionOnRequest = async (req, res) => {
       }
     }
 
+    const { notifyManagersForRepAction } = require('../utils/notificationHelper');
+
     if (action === 'APPROVE') {
       request.status = 'Approved_Rep';
       await request.save();
+      await notifyManagersForRepAction({
+        repId: req.user._id,
+        title: 'Sales Rep Request Approval',
+        message: `Sales Representative ${req.user.name || 'Rep'} approved Product Request ${request.requestNumber}`
+      });
       return res.json({ message: 'Product request approved by Sales Representative', request });
     }
 
     if (action === 'REJECT') {
       request.status = 'Rejected_Rep';
       await request.save();
+      await notifyManagersForRepAction({
+        repId: req.user._id,
+        title: 'Sales Rep Request Rejection',
+        message: `Sales Representative ${req.user.name || 'Rep'} rejected Product Request ${request.requestNumber}`
+      });
       return res.json({ message: 'Product request rejected by Sales Representative', request });
     }
 
@@ -454,6 +470,10 @@ const managerAction = async (req, res) => {
       return res.status(404).json({ message: 'Customer request not found' });
     }
 
+    if (request.status === 'Closed' || request.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
+    }
+
     // STRICT BACKEND RULE FOR HIGH RISK:
     // Manager CANNOT give final APPROVE / REJECT / REQUEST_CHANGES decision before Finance has responded!
     if (request.riskLevel === 'HIGH') {
@@ -523,6 +543,16 @@ const managerAction = async (req, res) => {
     }
 
     await request.save();
+
+    // NOTIFY CUSTOMER & SALES REP OF MANAGER DECISION
+    const { notifyCustomerAndRepOnManagerAction } = require('../utils/notificationHelper');
+    await notifyCustomerAndRepOnManagerAction({
+      customerId: request.customer,
+      repId: request.assignedSalesRep,
+      title: `Sales Manager Decision: ${action}`,
+      message: `Sales Manager updated Product Request ${request.requestNumber} status to '${request.status}'. Note: "${comment || 'Decision updated'}"`
+    });
+
     res.json({ message: `Request manager decision '${action}' saved successfully`, request, approval });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -742,6 +772,33 @@ const createQuotationFromRequest = async (req, res) => {
   }
 };
 
+// @desc Discard/Soft Delete Customer Request (Available for Customer, Rep, Manager, Finance, Admin)
+// @route POST /api/customer-requests/:id/discard
+const discardCustomerRequest = async (req, res) => {
+  try {
+    const request = await CustomerRequest.findById(req.params.id);
+    if (!request) {
+      return res.status(404).json({ message: 'Customer Request not found' });
+    }
+
+    request.status = 'DISCARDED';
+    await request.save();
+
+    // If there is an associated quotation, discard it as well
+    if (request.quotation) {
+      const quotation = await Quotation.findById(request.quotation);
+      if (quotation) {
+        quotation.status = 'DISCARDED';
+        await quotation.save();
+      }
+    }
+
+    res.json({ message: 'Request discarded successfully and moved to Discarded Records', request });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   createCustomerRequest,
   getCustomerRequests,
@@ -752,6 +809,7 @@ module.exports = {
   financeAction,
   managerAction,
   startNegotiationFromRequest,
-  createQuotationFromRequest
+  createQuotationFromRequest,
+  discardCustomerRequest
 };
 
