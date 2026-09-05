@@ -26,7 +26,17 @@ const seedData = async () => {
   try {
     await connectDB();
 
-    console.log('Wiping database collections for clean 12-user demo dataset...');
+    const existingAdmin = await User.findOne({ email: 'admin@dealflow360.com' });
+    const isForce = process.argv.includes('--force');
+
+    if (existingAdmin && !isForce) {
+      console.log('Database already contains demo data. Skipping seed.');
+      process.exit(0);
+      return;
+    }
+
+    console.log('Clearing database collections for clean 12-user demo dataset...');
+
 
     await Promise.all([
       User.deleteMany({}),

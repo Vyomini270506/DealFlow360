@@ -23,6 +23,8 @@ const customerRequestSchema = new mongoose.Schema({
       'Approved_Rep',
       'Rejected_Rep',
       'Escalated_Manager',
+      'WAITING_FOR_FINANCE',
+      'FINANCE_REVIEWED',
       'Approved_Manager',
       'Rejected_Manager',
       'Negotiation_Required',
@@ -38,7 +40,13 @@ const customerRequestSchema = new mongoose.Schema({
   riskReasons: [{ type: String }],
   escalationReason: { type: String, default: '' },
   managerComment: { type: String, default: '' },
+  financeUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  financeDecision: { type: String, enum: ['SUPPORT', 'DO_NOT_SUPPORT', 'REQUEST_CHANGES', 'NONE'], default: 'NONE' },
+  financeComment: { type: String, default: '' },
+  financeDecisionAt: { type: Date, default: null },
+  activeNegotiation: { type: mongoose.Schema.Types.ObjectId, ref: 'Negotiation', default: null },
   quotation: { type: mongoose.Schema.Types.ObjectId, ref: 'Quotation', default: null }
 }, { timestamps: true });
 
 module.exports = mongoose.model('CustomerRequest', customerRequestSchema);
+

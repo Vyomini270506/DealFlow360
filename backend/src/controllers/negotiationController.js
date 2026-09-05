@@ -196,73 +196,40 @@ const reopenNegotiation = async (req, res) => {
       return res.status(404).json({ message: 'Quotation not found' });
     }
 
-    let negotiation = await Negotiation.findOne({ quotation: quotation._id });
-    if (!negotiation) {
-      negotiation = new Negotiation({
-        quotation: quotation._id,
-        customer: quotation.customer,
-        salesRep: quotation.salesRep,
-        status: 'Open',
-        messages: []
-      });
+    // If an existing negotiation is Rejected or Closed, close it and start a new attempt
+    let nextAttempt = 1;
+    let existingNegotiation = await Negotiation.findOne({ quotation: quotation._id });
+    if (existingNegotiation) {
+      nextAttempt = (existingNegotiation.attempt || 1) + 1;
+      existingNegotiation.status = 'Closed';
+      await existingNegotiation.save();
     }
 
-    const prevDiscount = quotation.totalDiscount;
-
-    // Apply proposed discount to items
-    quotation.items.forEach(item => {
-      item.discountPercent = Number(proposedDiscountPercent);
-      item.finalUnitPrice = item.unitPrice * (1 - item.discountPercent / 100);
-      item.lineTotal = item.finalUnitPrice * item.quantity;
-    });
-
-    const { totalBreaches } = await validateQuotationDiscounts(quotation.items, quotation.customer);
-
-    let subtotal = 0;
-    let totalDiscount = 0;
-    quotation.items.forEach(item => {
-      subtotal += item.unitPrice * item.quantity;
-      totalDiscount += (item.unitPrice * (item.discountPercent / 100)) * item.quantity;
-    });
-
-    quotation.subtotal = Number(subtotal.toFixed(2));
-    quotation.totalDiscount = Number(totalDiscount.toFixed(2));
-    quotation.tax = Number(((subtotal - totalDiscount) * 0.18).toFixed(2));
-    quotation.grandTotal = Number(((subtotal - totalDiscount) + quotation.tax).toFixed(2));
-
-    const riskAnalysis = await calculateRiskScore({
-      items: quotation.items,
-      grandTotal: quotation.grandTotal,
-      totalBreaches,
-      isNegotiationActive: true
-    });
-
-    quotation.riskScore = riskAnalysis.score;
-    quotation.riskLevel = riskAnalysis.level;
-    quotation.riskReasons = riskAnalysis.reasons;
-    quotation.status = 'Pending Approval';
-    quotation.approvalChainState = 'SALES_MANAGER';
-
-    // Record history entry
-    negotiation.status = 'Re-approval Required';
-    negotiation.previousDiscount = prevDiscount;
-    negotiation.currentRequestedDiscount = Number(proposedDiscountPercent);
-    negotiation.history.push({
-      action: 'REOPENED',
+    negotiation = new Negotiation({
+      quotation: quotation._id,
+      customerRequest: quotation.customerRequest || null,
+      customer: quotation.customer,
+      salesRep: quotation.salesRep,
+      attempt: nextAttempt,
+      status: 'Re-approval Required',
       previousDiscount: prevDiscount,
-      requestedDiscount: Number(proposedDiscountPercent),
-      message,
-      updatedBy: req.user._id,
-      updatedByRole: req.user.role,
-      timestamp: new Date()
-    });
-
-    negotiation.messages.push({
-      sender: req.user._id,
-      senderRole: req.user.role,
-      message: `[Reopened Negotiation] Proposing ${proposedDiscountPercent}% discount. Reason: ${message}`,
-      counterDiscountPercent: Number(proposedDiscountPercent),
-      timestamp: new Date()
+      currentRequestedDiscount: Number(proposedDiscountPercent),
+      messages: [{
+        sender: req.user._id,
+        senderRole: req.user.role,
+        message: `[Reopened Negotiation Attempt #${nextAttempt}] Proposing ${proposedDiscountPercent}% discount. Reason: ${message}`,
+        counterDiscountPercent: Number(proposedDiscountPercent),
+        timestamp: new Date()
+      }],
+      history: [{
+        action: 'REOPENED',
+        previousDiscount: prevDiscount,
+        requestedDiscount: Number(proposedDiscountPercent),
+        message,
+        updatedBy: req.user._id,
+        updatedByRole: req.user.role,
+        timestamp: new Date()
+      }]
     });
 
     // Update approval record
@@ -270,6 +237,7 @@ const reopenNegotiation = async (req, res) => {
     if (!approval) {
       approval = new Approval({
         quotation: quotation._id,
+        customerRequest: quotation.customerRequest || null,
         salesRep: quotation.salesRep,
         currentStep: 'SALES_MANAGER',
         riskScore: riskAnalysis.score,
@@ -288,7 +256,7 @@ const reopenNegotiation = async (req, res) => {
       user: req.user._id,
       action: 'REOPENED',
       role: req.user.role,
-      reason: `Customer reopened negotiation with ${proposedDiscountPercent}% counter proposal: ${message}`
+      reason: `Customer reopened negotiation (Attempt #${nextAttempt}) with ${proposedDiscountPercent}% counter proposal: ${message}`
     });
 
     await quotation.save();
@@ -300,6 +268,7 @@ const reopenNegotiation = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 // @desc Sales Representative accepts a low-risk negotiation counter-offer directly
 // @route POST /api/negotiations/quotation/:quotationId/accept

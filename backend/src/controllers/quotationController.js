@@ -98,9 +98,20 @@ const getQuotationById = async (req, res) => {
 // @route POST /api/quotations
 const createQuotation = async (req, res) => {
   try {
-    const { customerId, items, notes } = req.body;
+    const { customerId, customerRequest, items, notes } = req.body;
+
+    if (customerRequest) {
+      const existingQuotation = await Quotation.findOne({ customerRequest, status: { $ne: 'Cancelled' } })
+        .populate('customer')
+        .populate('salesRep', 'name email')
+        .populate('items.product');
+      if (existingQuotation) {
+        return res.status(200).json(existingQuotation);
+      }
+    }
 
     const count = await Quotation.countDocuments();
+
     const quoteNumber = `Q-${1000 + count + 1}`;
 
     const targetCustomer = await Customer.findById(customerId);

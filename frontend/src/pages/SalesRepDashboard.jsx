@@ -87,7 +87,19 @@ const SalesRepDashboard = () => {
     }
   };
 
+  const handleStartNegotiationFromRequest = async (requestId) => {
+    try {
+      const { data } = await API.post(`/customer-requests/${requestId}/start-negotiation`, {});
+      toast.success(data.message || 'Negotiation started successfully');
+      fetchDashboardData();
+      setActiveTab('negotiations');
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to start negotiation');
+    }
+  };
+
   const handleRepActionOnRequest = async (requestId, action) => {
+
     try {
       const { data } = await API.post(`/customer-requests/${requestId}/rep-action`, { action });
       if (action === 'APPROVE') toast.success('Product Request approved! You can now generate a quotation.');
@@ -420,13 +432,20 @@ const SalesRepDashboard = () => {
                           {reqItem.status === 'Negotiation_Required' && (
                             <div className="inline-flex flex-col items-end gap-1">
                               <span className="text-[10px] font-extrabold text-amber-500 bg-amber-500/10 px-2 py-1 rounded border border-amber-500/30">
-                                NEGOTIATION REQUIRED 💬
+                                Manager requested negotiation 💬
                               </span>
                               {reqItem.managerComment && (
-                                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium italic">Manager: "{reqItem.managerComment}"</span>
+                                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium italic">Manager Note: "{reqItem.managerComment}"</span>
                               )}
+                              <button
+                                onClick={() => handleStartNegotiationFromRequest(reqItem._id)}
+                                className="mt-1 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs inline-flex items-center gap-1 shadow-sm transition"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" /> Start Negotiation
+                              </button>
                             </div>
                           )}
+
 
                           {/* ESCALATED / WAITING FOR SALES MANAGER */}
                           {reqItem.status === 'Escalated_Manager' && (
