@@ -9,9 +9,24 @@ const { calculateRiskScore } = require('../services/riskEngine');
 const getNegotiationByQuotation = async (req, res) => {
   try {
     let negotiation = await Negotiation.findOne({ quotation: req.params.quotationId })
-      .populate('customer', 'name company')
-      .populate('salesRep', 'name email')
-      .populate('messages.sender', 'name role avatar');
+      .populate({
+        path: 'quotation',
+        populate: [
+          { path: 'salesRep', select: 'name email role' },
+          { path: 'items.product', select: 'name unitPrice sku' }
+        ]
+      })
+      .populate({
+        path: 'customerRequest',
+        populate: [
+          { path: 'assignedSalesRep', select: 'name email role' },
+          { path: 'items.product', select: 'name unitPrice sku' }
+        ]
+      })
+      .populate('customer', 'name company tier email')
+      .populate('salesRep', 'name email role')
+      .populate('messages.sender', 'name role avatar')
+      .populate('history.updatedBy', 'name role');
 
     if (!negotiation) {
       const quotation = await Quotation.findById(req.params.quotationId);
@@ -21,12 +36,104 @@ const getNegotiationByQuotation = async (req, res) => {
 
       negotiation = new Negotiation({
         quotation: quotation._id,
+        customerRequest: quotation.customerRequest || null,
         customer: quotation.customer,
         salesRep: quotation.salesRep,
         status: 'Open',
         messages: []
       });
       await negotiation.save();
+
+      negotiation = await Negotiation.findById(negotiation._id)
+        .populate({
+          path: 'quotation',
+          populate: [
+            { path: 'salesRep', select: 'name email role' },
+            { path: 'items.product', select: 'name unitPrice sku' }
+          ]
+        })
+        .populate({
+          path: 'customerRequest',
+          populate: [
+            { path: 'assignedSalesRep', select: 'name email role' },
+            { path: 'items.product', select: 'name unitPrice sku' }
+          ]
+        })
+        .populate('customer', 'name company tier email')
+        .populate('salesRep', 'name email role')
+        .populate('messages.sender', 'name role avatar');
+    }
+
+    res.json(negotiation);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Get negotiation thread by CustomerRequest ID
+// @route GET /api/negotiations/customer-request/:requestId
+const getNegotiationByCustomerRequest = async (req, res) => {
+  try {
+    const CustomerRequest = require('../models/CustomerRequest');
+    let negotiation = await Negotiation.findOne({ customerRequest: req.params.requestId })
+      .populate({
+        path: 'quotation',
+        populate: [
+          { path: 'salesRep', select: 'name email role' },
+          { path: 'items.product', select: 'name unitPrice sku' }
+        ]
+      })
+      .populate({
+        path: 'customerRequest',
+        populate: [
+          { path: 'assignedSalesRep', select: 'name email role' },
+          { path: 'items.product', select: 'name unitPrice sku' }
+        ]
+      })
+      .populate('customer', 'name company tier email')
+      .populate('salesRep', 'name email role')
+      .populate('messages.sender', 'name role avatar')
+      .populate('history.updatedBy', 'name role');
+
+    if (!negotiation) {
+      const request = await CustomerRequest.findById(req.params.requestId);
+      if (!request) {
+        return res.status(404).json({ message: 'Customer Request not found' });
+      }
+
+      let maxDisc = 0;
+      if (request.items && Array.isArray(request.items)) {
+        request.items.forEach(i => {
+          if (i.desiredDiscountPercent > maxDisc) maxDisc = i.desiredDiscountPercent;
+        });
+      }
+
+      negotiation = new Negotiation({
+        customerRequest: request._id,
+        customer: request.customer,
+        salesRep: request.assignedSalesRep,
+        status: 'Open',
+        currentRequestedDiscount: maxDisc,
+        messages: [{
+          sender: req.user._id,
+          senderRole: req.user.role,
+          message: request.managerComment ? `[Negotiation Thread Opened] Manager Note: ${request.managerComment}` : 'Negotiation thread opened.',
+          timestamp: new Date()
+        }]
+      });
+      await negotiation.save();
+
+      negotiation = await Negotiation.findById(negotiation._id)
+        .populate({
+          path: 'customerRequest',
+          populate: [
+            { path: 'assignedSalesRep', select: 'name email role' },
+            { path: 'items.product', select: 'name unitPrice sku' }
+          ]
+        })
+        .populate('customer', 'name company tier email')
+        .populate('salesRep', 'name email role')
+        .populate('messages.sender', 'name role avatar');
     }
 
     res.json(negotiation);
@@ -434,12 +541,175 @@ const getSalesRepNegotiations = async (req, res) => {
   }
 };
 
+// @desc Get negotiation thread by Negotiation ID
+// @route GET /api/negotiations/:id
+const getNegotiationById = async (req, res) => {
+  try {
+    const negotiation = await Negotiation.findById(req.params.id)
+      .populate({
+        path: 'quotation',
+        populate: [
+          { path: 'salesRep', select: 'name email role' },
+          { path: 'items.product', select: 'name unitPrice sku' }
+        ]
+      })
+      .populate({
+        path: 'customerRequest',
+        populate: [
+          { path: 'assignedSalesRep', select: 'name email role' },
+          { path: 'items.product', select: 'name unitPrice sku' }
+        ]
+      })
+      .populate('customer', 'name company tier email')
+      .populate('salesRep', 'name email role')
+      .populate('messages.sender', 'name role avatar')
+      .populate('history.updatedBy', 'name role');
+
+    if (!negotiation) {
+      return res.status(404).json({ message: 'Negotiation thread not found' });
+    }
+
+    res.json(negotiation);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Add message or counter discount proposal by Negotiation ID
+// @route POST /api/negotiations/:id/message
+const addNegotiationMessageById = async (req, res) => {
+  try {
+    const { itemIndex, message, counterDiscountPercent } = req.body;
+
+    const negotiation = await Negotiation.findById(req.params.id);
+    if (!negotiation) {
+      return res.status(404).json({ message: 'Negotiation thread not found' });
+    }
+
+    negotiation.messages.push({
+      sender: req.user._id,
+      senderRole: req.user.role,
+      itemIndex: itemIndex !== undefined ? itemIndex : null,
+      message: message || '',
+      counterDiscountPercent: counterDiscountPercent !== undefined && counterDiscountPercent !== '' && counterDiscountPercent !== null ? Number(counterDiscountPercent) : null,
+      timestamp: new Date()
+    });
+
+    if (counterDiscountPercent !== undefined && counterDiscountPercent !== null && counterDiscountPercent !== '') {
+      negotiation.currentRequestedDiscount = Number(counterDiscountPercent);
+      negotiation.history.push({
+        action: req.user.role === 'CUSTOMER' ? 'COUNTER_OFFER' : 'PROPOSED',
+        requestedDiscount: Number(counterDiscountPercent),
+        message: message || 'Counter discount proposed',
+        updatedBy: req.user._id,
+        updatedByRole: req.user.role,
+        timestamp: new Date()
+      });
+    }
+
+    // If linked to quotation, recalculate totals & risk
+    let triggerReapproval = false;
+    if (negotiation.quotation) {
+      const quotation = await Quotation.findById(negotiation.quotation);
+      if (quotation) {
+        if (counterDiscountPercent !== undefined && counterDiscountPercent !== null && counterDiscountPercent !== '' && itemIndex !== undefined && quotation.items[itemIndex]) {
+          quotation.items[itemIndex].discountPercent = Number(counterDiscountPercent);
+        }
+
+        const { totalBreaches } = await validateQuotationDiscounts(quotation.items, quotation.customer);
+
+        let subtotal = 0;
+        let totalDiscount = 0;
+        quotation.items.forEach(item => {
+          subtotal += item.unitPrice * item.quantity;
+          totalDiscount += (item.unitPrice * (item.discountPercent / 100)) * item.quantity;
+          item.finalUnitPrice = item.unitPrice * (1 - item.discountPercent / 100);
+          item.lineTotal = item.finalUnitPrice * item.quantity;
+        });
+
+        quotation.subtotal = Number(subtotal.toFixed(2));
+        quotation.totalDiscount = Number(totalDiscount.toFixed(2));
+        quotation.tax = Number(((subtotal - totalDiscount) * 0.18).toFixed(2));
+        quotation.grandTotal = Number(((subtotal - totalDiscount) + quotation.tax).toFixed(2));
+
+        const riskAnalysis = await calculateRiskScore({
+          items: quotation.items,
+          grandTotal: quotation.grandTotal,
+          totalBreaches,
+          isNegotiationActive: true
+        });
+
+        quotation.riskScore = riskAnalysis.score;
+        quotation.riskLevel = riskAnalysis.level;
+        quotation.riskReasons = riskAnalysis.reasons;
+
+        if (totalBreaches > 0 || riskAnalysis.score >= 30) {
+          triggerReapproval = true;
+          quotation.status = 'Pending Approval';
+          quotation.approvalChainState = 'SALES_MANAGER';
+          negotiation.status = 'Re-approval Required';
+
+          let approval = await Approval.findOne({ quotation: quotation._id });
+          if (!approval) {
+            approval = new Approval({
+              quotation: quotation._id,
+              salesRep: quotation.salesRep,
+              currentStep: 'SALES_MANAGER',
+              riskScore: riskAnalysis.score,
+              riskLevel: riskAnalysis.level,
+              riskReasons: riskAnalysis.reasons,
+              managerApproval: { status: 'PENDING' },
+              financeApproval: { status: riskAnalysis.level === 'HIGH' ? 'PENDING' : 'NOT_REQUIRED' }
+            });
+          } else {
+            approval.currentStep = 'SALES_MANAGER';
+            approval.managerApproval.status = 'PENDING';
+            approval.financeApproval.status = riskAnalysis.level === 'HIGH' ? 'PENDING' : 'NOT_REQUIRED';
+          }
+          await approval.save();
+        }
+        await quotation.save();
+      }
+    }
+
+    await negotiation.save();
+
+    const populatedNeg = await Negotiation.findById(negotiation._id)
+      .populate({
+        path: 'quotation',
+        populate: [
+          { path: 'salesRep', select: 'name email role' },
+          { path: 'items.product', select: 'name unitPrice sku' }
+        ]
+      })
+      .populate({
+        path: 'customerRequest',
+        populate: [
+          { path: 'assignedSalesRep', select: 'name email role' },
+          { path: 'items.product', select: 'name unitPrice sku' }
+        ]
+      })
+      .populate('customer', 'name company tier email')
+      .populate('salesRep', 'name email role')
+      .populate('messages.sender', 'name role avatar')
+      .populate('history.updatedBy', 'name role');
+
+    res.json(populatedNeg);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getNegotiationByQuotation,
+  getNegotiationByCustomerRequest,
   addNegotiationMessage,
+  getNegotiationById,
+  addNegotiationMessageById,
   getCustomerNegotiations,
   getSalesRepNegotiations,
   reopenNegotiation,
   acceptNegotiation,
   escalateNegotiationToManager
 };
+

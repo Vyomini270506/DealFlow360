@@ -91,8 +91,11 @@ const SalesRepDashboard = () => {
     try {
       const { data } = await API.post(`/customer-requests/${requestId}/start-negotiation`, {});
       toast.success(data.message || 'Negotiation started successfully');
+      const negId = data.negotiation?._id || data._id;
+      if (negId) {
+        setActiveNegotiationId(negId);
+      }
       fetchDashboardData();
-      setActiveTab('negotiations');
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to start negotiation');
     }
@@ -930,6 +933,7 @@ const SalesRepDashboard = () => {
 
       <NegotiationDrawer
         isOpen={!!activeNegotiationId}
+        negotiationId={activeNegotiationId}
         quotationId={activeNegotiationId}
         onClose={() => setActiveNegotiationId(null)}
         onSuccess={fetchDashboardData}

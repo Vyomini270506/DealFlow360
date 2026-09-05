@@ -191,6 +191,17 @@ const CustomerPortal = () => {
     }
   };
 
+  const handleOpenQuotationNegotiation = async (quotationId) => {
+    try {
+      const { data } = await API.get(`/negotiations/quotation/${quotationId}`);
+      if (data && data._id) {
+        setActiveNegotiationId(data._id);
+      }
+    } catch (err) {
+      toast.error('Failed to open quotation negotiation thread');
+    }
+  };
+
   const handleOpenNegotiationSubmit = async (e) => {
     e.preventDefault();
     if (!openNegModalQuote || !openNegDiscount) return;
@@ -665,15 +676,11 @@ const CustomerPortal = () => {
 
                             {/* Open Negotiation Button */}
                             <button
-                              onClick={() => {
-                                setOpenNegModalQuote(q);
-                                setOpenNegDiscount('');
-                                setOpenNegMessage('');
-                              }}
-                              className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 transition shadow-sm"
-                            >
-                              <MessageSquare className="w-3.5 h-3.5" /> Open Negotiation
-                            </button>
+                               onClick={() => handleOpenQuotationNegotiation(q._id)}
+                               className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 transition shadow-sm"
+                             >
+                               <MessageSquare className="w-3.5 h-3.5" /> Open Negotiation
+                             </button>
 
                             {/* Reject Button */}
                             <button
@@ -754,10 +761,10 @@ const CustomerPortal = () => {
 
                       <div className="flex items-center justify-between pt-1">
                         <button
-                          onClick={() => setActiveNegotiationId(q._id)}
+                          onClick={() => setActiveNegotiationId(neg._id || q._id)}
                           className="px-3 py-1.5 rounded-lg bg-muted border border-border text-foreground hover:bg-card font-bold text-xs inline-flex items-center gap-1.5 transition"
                         >
-                          <MessageSquare className="w-3.5 h-3.5 text-primary" /> View Q&A History
+                          <MessageSquare className="w-3.5 h-3.5 text-primary" /> Open Negotiation Thread
                         </button>
 
                         {isRejected && (
@@ -1442,6 +1449,7 @@ const CustomerPortal = () => {
       {/* Negotiation Drawer Component */}
       <NegotiationDrawer
         isOpen={!!activeNegotiationId}
+        negotiationId={activeNegotiationId}
         quotationId={activeNegotiationId}
         onClose={() => setActiveNegotiationId(null)}
         onSuccess={fetchCustomerData}
