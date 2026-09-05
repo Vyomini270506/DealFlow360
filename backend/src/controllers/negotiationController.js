@@ -158,4 +158,152 @@ const addNegotiationMessage = async (req, res) => {
   }
 };
 
-module.exports = { getNegotiationByQuotation, addNegotiationMessage };
+// @desc Get customer negotiation corner details
+// @route GET /api/negotiations/customer-corner
+const getCustomerNegotiations = async (req, res) => {
+  try {
+    const customerId = req.user.customerId;
+    if (!customerId) {
+      return res.json([]);
+    }
+
+    const negotiations = await Negotiation.find({ customer: customerId })
+      .populate({
+        path: 'quotation',
+        populate: [
+          { path: 'salesRep', select: 'name email role' },
+          { path: 'items.product', select: 'name unitPrice' }
+        ]
+      })
+      .populate('salesRep', 'name email role')
+      .populate('messages.sender', 'name role')
+      .populate('history.updatedBy', 'name role');
+
+    res.json(negotiations);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Customer reopens a rejected negotiation with a new proposed discount & reason
+// @route POST /api/negotiations/reopen
+const reopenNegotiation = async (req, res) => {
+  try {
+    const { quotationId, proposedDiscountPercent, message } = req.body;
+
+    const quotation = await Quotation.findById(quotationId);
+    if (!quotation) {
+      return res.status(404).json({ message: 'Quotation not found' });
+    }
+
+    let negotiation = await Negotiation.findOne({ quotation: quotation._id });
+    if (!negotiation) {
+      negotiation = new Negotiation({
+        quotation: quotation._id,
+        customer: quotation.customer,
+        salesRep: quotation.salesRep,
+        status: 'Open',
+        messages: []
+      });
+    }
+
+    const prevDiscount = quotation.totalDiscount;
+
+    // Apply proposed discount to items
+    quotation.items.forEach(item => {
+      item.discountPercent = Number(proposedDiscountPercent);
+      item.finalUnitPrice = item.unitPrice * (1 - item.discountPercent / 100);
+      item.lineTotal = item.finalUnitPrice * item.quantity;
+    });
+
+    const { totalBreaches } = await validateQuotationDiscounts(quotation.items, quotation.customer);
+
+    let subtotal = 0;
+    let totalDiscount = 0;
+    quotation.items.forEach(item => {
+      subtotal += item.unitPrice * item.quantity;
+      totalDiscount += (item.unitPrice * (item.discountPercent / 100)) * item.quantity;
+    });
+
+    quotation.subtotal = Number(subtotal.toFixed(2));
+    quotation.totalDiscount = Number(totalDiscount.toFixed(2));
+    quotation.tax = Number(((subtotal - totalDiscount) * 0.18).toFixed(2));
+    quotation.grandTotal = Number(((subtotal - totalDiscount) + quotation.tax).toFixed(2));
+
+    const riskAnalysis = await calculateRiskScore({
+      items: quotation.items,
+      grandTotal: quotation.grandTotal,
+      totalBreaches,
+      isNegotiationActive: true
+    });
+
+    quotation.riskScore = riskAnalysis.score;
+    quotation.riskLevel = riskAnalysis.level;
+    quotation.riskReasons = riskAnalysis.reasons;
+    quotation.status = 'Pending Approval';
+    quotation.approvalChainState = 'SALES_MANAGER';
+
+    // Record history entry
+    negotiation.status = 'Re-approval Required';
+    negotiation.previousDiscount = prevDiscount;
+    negotiation.currentRequestedDiscount = Number(proposedDiscountPercent);
+    negotiation.history.push({
+      action: 'REOPENED',
+      previousDiscount: prevDiscount,
+      requestedDiscount: Number(proposedDiscountPercent),
+      message,
+      updatedBy: req.user._id,
+      updatedByRole: req.user.role,
+      timestamp: new Date()
+    });
+
+    negotiation.messages.push({
+      sender: req.user._id,
+      senderRole: req.user.role,
+      message: `[Reopened Negotiation] Proposing ${proposedDiscountPercent}% discount. Reason: ${message}`,
+      counterDiscountPercent: Number(proposedDiscountPercent),
+      timestamp: new Date()
+    });
+
+    // Update approval record
+    let approval = await Approval.findOne({ quotation: quotation._id });
+    if (!approval) {
+      approval = new Approval({
+        quotation: quotation._id,
+        salesRep: quotation.salesRep,
+        currentStep: 'SALES_MANAGER',
+        riskScore: riskAnalysis.score,
+        riskLevel: riskAnalysis.level,
+        riskReasons: riskAnalysis.reasons,
+        managerApproval: { status: 'PENDING' },
+        financeApproval: { status: riskAnalysis.level === 'HIGH' ? 'PENDING' : 'NOT_REQUIRED' }
+      });
+    } else {
+      approval.currentStep = 'SALES_MANAGER';
+      approval.managerApproval.status = 'PENDING';
+      approval.financeApproval.status = riskAnalysis.level === 'HIGH' ? 'PENDING' : 'NOT_REQUIRED';
+    }
+
+    approval.auditTrail.push({
+      user: req.user._id,
+      action: 'REOPENED',
+      role: req.user.role,
+      reason: `Customer reopened negotiation with ${proposedDiscountPercent}% counter proposal: ${message}`
+    });
+
+    await quotation.save();
+    await negotiation.save();
+    await approval.save();
+
+    res.json({ quotation, negotiation, approval });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = {
+  getNegotiationByQuotation,
+  addNegotiationMessage,
+  getCustomerNegotiations,
+  reopenNegotiation
+};

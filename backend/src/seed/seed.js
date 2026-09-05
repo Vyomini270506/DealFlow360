@@ -18,12 +18,20 @@ const Backorder = require('../models/Backorder');
 const Invoice = require('../models/Invoice');
 const Subscription = require('../models/Subscription');
 const Negotiation = require('../models/Negotiation');
+const CustomerRequest = require('../models/CustomerRequest');
 
 dotenv.config();
 
 const seedData = async () => {
   try {
     await connectDB();
+
+    const existingUsers = await User.countDocuments();
+    if (existingUsers > 0 && !process.env.FORCE_SEED) {
+      console.log('Database already contains data. Skipping seed.');
+      return true;
+    }
+
     console.log('Clearing existing database collections...');
 
     await Promise.all([
@@ -41,7 +49,8 @@ const seedData = async () => {
       Backorder.deleteMany({}),
       Invoice.deleteMany({}),
       Subscription.deleteMany({}),
-      Negotiation.deleteMany({})
+      Negotiation.deleteMany({}),
+      CustomerRequest.deleteMany({})
     ]);
 
     console.log('Seeding Discount Tiers & Category Limits...');
@@ -63,7 +72,7 @@ const seedData = async () => {
       { name: 'Anita Roy', email: 'anita@technova.io', company: 'TechNova', tier: 'Silver', phone: '+91 9812345678', address: 'Koramangala, Bangalore' },
       { name: 'Vikram Singh', email: 'vikram@globalsys.com', company: 'Global Systems', tier: 'Bronze', phone: '+91 9988776655', address: 'Cyber City, Gurgaon' },
       { name: 'Pooja Mehta', email: 'pooja@urbanretail.in', company: 'Urban Retail', tier: 'Gold', phone: '+91 9711223344', address: 'Connaught Place, New Delhi' },
-      { name: 'Sanjay Dutt', email: 'sanjay@novaind.com', company: 'Nova Industries', tier: 'Silver', phone: '+91 9654321876', address: 'HITEC City, Hyderabad' }
+      { name: 'Sanjay Dutt', email: 'sanjay@novaind.com', company: 'Nova Industries', tier: 'Silver', phone: '+91 9654321876', address: 'HITEC City, Hyderabad', assignmentStatus: 'UNASSIGNED' }
     ]);
 
     console.log('Seeding Users & Team Hierarchy...');
@@ -151,6 +160,14 @@ const seedData = async () => {
       password: 'password123',
       role: 'CUSTOMER',
       customerId: customers[1]._id
+    });
+
+    // Set assigned rep for Customer 0 (Acme Corp)
+    await Customer.findByIdAndUpdate(customers[0]._id, {
+      assignedSalesManager: manager._id,
+      assignedSalesRepresentative: repRahul._id,
+      assignmentStatus: 'REP_ASSIGNED',
+      assignedAt: new Date()
     });
 
     console.log('Seeding Products...');
@@ -447,6 +464,35 @@ const seedData = async () => {
         }
       ]
     });
+
+    console.log('Seeding Customer Product Requests (Least-Workload Assignment)...');
+    await CustomerRequest.insertMany([
+      {
+        requestNumber: 'PR-1001',
+        customer: customers[0]._id, // Acme
+        user: customerUser1._id,
+        assignedSalesRep: repRahul._id,
+        items: [{ product: products[0]._id, quantity: 5, desiredDiscountPercent: 8 }],
+        message: 'Looking for 5 Business Laptops for our engineering team.',
+        status: 'Pending',
+        riskScore: 10,
+        riskLevel: 'LOW',
+        riskReasons: ['Standard discount request within tier limit']
+      },
+      {
+        requestNumber: 'PR-1002',
+        customer: customers[1]._id, // TechNova
+        user: customerUser2._id,
+        assignedSalesRep: repRahul._id,
+        items: [{ product: products[1]._id, quantity: 2, desiredDiscountPercent: 18 }],
+        message: 'Requesting 18% discount for enterprise rack servers.',
+        status: 'Escalated_Manager',
+        riskScore: 80,
+        riskLevel: 'HIGH',
+        riskReasons: ['Discount (18%) exceeds Silver tier limit (10%) by 8 points.'],
+        escalationReason: 'Escalated to Sales Manager for signoff due to High Risk level.'
+      }
+    ]);
 
     console.log('=======================================================');
     console.log(' DealFlow360 Seed Data successfully populated!         ');

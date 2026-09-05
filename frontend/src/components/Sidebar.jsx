@@ -12,7 +12,11 @@ import {
   Settings, 
   MessageSquare,
   Users,
-  Briefcase
+  Briefcase,
+  ShoppingCart,
+  CreditCard,
+  UserCheck,
+  Send
 } from 'lucide-react';
 
 const Sidebar = () => {
@@ -48,10 +52,13 @@ const Sidebar = () => {
         ];
       case 'CUSTOMER':
         return [
-          { name: 'Customer Portal', path: '/customer-portal', icon: LayoutDashboard },
-          { name: 'My Quotations', path: '/quotations', icon: FileText },
-          { name: 'Invoices & Payments', path: '/invoices', icon: FileCheck2 },
-          { name: 'My Subscriptions', path: '/subscriptions', icon: Repeat },
+          { name: 'Dashboard', path: '/customer-portal?tab=dashboard', icon: LayoutDashboard },
+          { name: 'Requests', path: '/customer-portal?tab=requests', icon: ShoppingCart },
+          { name: 'Quotations', path: '/customer-portal?tab=quotations', icon: FileText },
+          { name: 'Negotiation Corner', path: '/customer-portal?tab=negotiations', icon: MessageSquare },
+          { name: 'Billing', path: '/customer-portal?tab=billing', icon: CreditCard },
+          { name: 'Messages', path: '/customer-portal?tab=messages', icon: Send },
+          { name: 'Profile', path: '/customer-portal?tab=profile', icon: UserCheck },
         ];
       case 'ADMIN':
         return [

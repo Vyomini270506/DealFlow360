@@ -24,6 +24,9 @@ app.use('/api/subscriptions', require('./routes/subscriptionRoutes'));
 app.use('/api/negotiations', require('./routes/negotiationRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/analytics', require('./routes/analyticsRoutes'));
+app.use('/api/assignments', require('./routes/assignmentRoutes'));
+app.use('/api/customer-requests', require('./routes/customerRequestRoutes'));
+app.use('/api/messages', require('./routes/messageRoutes'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -33,8 +36,10 @@ app.get('/api/health', (req, res) => {
 // Seed endpoint for quick demo trigger via HTTP if needed
 app.post('/api/seed', async (req, res) => {
   try {
+    process.env.FORCE_SEED = 'true';
     const seedScript = require('./seed/seed');
     await seedScript();
+    process.env.FORCE_SEED = '';
     res.json({ message: 'Seed data generated successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });

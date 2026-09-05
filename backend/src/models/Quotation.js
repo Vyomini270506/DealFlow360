@@ -15,7 +15,14 @@ const quotationItemSchema = new mongoose.Schema({
 const quotationSchema = new mongoose.Schema({
   quoteNumber: { type: String, required: true, unique: true },
   customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
-  salesRep: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  customerRequest: { type: mongoose.Schema.Types.ObjectId, ref: 'CustomerRequest', default: null },
+  salesRep: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  assignedSalesManager: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  assignmentStatus: { 
+    type: String, 
+    enum: ['UNASSIGNED', 'MANAGER_ASSIGNED', 'REP_ASSIGNED'], 
+    default: 'UNASSIGNED' 
+  },
   items: [quotationItemSchema],
   subtotal: { type: Number, required: true },
   totalDiscount: { type: Number, required: true, default: 0 },
@@ -44,6 +51,11 @@ const quotationSchema = new mongoose.Schema({
     default: 'NONE'
   },
   notes: { type: String, default: '' },
+  acceptedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  acceptedAt: { type: Date, default: null },
+  rejectedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  rejectedAt: { type: Date, default: null },
+  rejectionReason: { type: String, default: '' },
   expiresAt: { type: Date }
 }, { timestamps: true });
 

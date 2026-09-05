@@ -67,7 +67,14 @@ const getQuotationById = async (req, res) => {
     }
 
     // Check RBAC permission
-    if (req.user.role === 'SALES_REP' && quotation.salesRep._id.toString() !== req.user._id.toString()) {
+    if (req.user.role === 'CUSTOMER') {
+      const userCustId = req.user.customerId?._id ? req.user.customerId._id.toString() : req.user.customerId?.toString();
+      if (!userCustId || quotation.customer._id.toString() !== userCustId) {
+        return res.status(403).json({ message: 'Not authorized to view this quotation' });
+      }
+    }
+
+    if (req.user.role === 'SALES_REP' && quotation.salesRep && quotation.salesRep._id.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Not authorized to view this quotation' });
     }
 
@@ -82,7 +89,7 @@ const getQuotationById = async (req, res) => {
   }
 };
 
-// @desc Create new quotation
+// @desc Create new quotation with Automatic Least-Workload Sales Rep Assignment
 // @route POST /api/quotations
 const createQuotation = async (req, res) => {
   try {
@@ -90,6 +97,50 @@ const createQuotation = async (req, res) => {
 
     const count = await Quotation.countDocuments();
     const quoteNumber = `Q-${1000 + count + 1}`;
+
+    const targetCustomer = await Customer.findById(customerId);
+
+    // Determine Sales Rep via Automatic Least-Workload Algorithm
+    let assignedRepId = req.user.role === 'SALES_REP' ? req.user._id : null;
+    let assignedManagerId = null;
+
+    if (targetCustomer && targetCustomer.assignedSalesRepresentative) {
+      assignedRepId = targetCustomer.assignedSalesRepresentative;
+      assignedManagerId = targetCustomer.assignedSalesManager;
+    } else {
+      const salesReps = await User.find({ role: 'SALES_REP' });
+      if (salesReps.length > 0) {
+        let lowestWorkloadRep = null;
+        let minActiveCount = Infinity;
+
+        const activeStatuses = ['Draft', 'Pending Approval', 'Negotiation', 'Approved', 'Confirmed', 'Fulfillment'];
+
+        for (const rep of salesReps) {
+          const activeCount = await Quotation.countDocuments({
+            salesRep: rep._id,
+            status: { $in: activeStatuses }
+          });
+
+          if (activeCount < minActiveCount) {
+            minActiveCount = activeCount;
+            lowestWorkloadRep = rep;
+          }
+        }
+
+        if (lowestWorkloadRep) {
+          assignedRepId = lowestWorkloadRep._id;
+          assignedManagerId = lowestWorkloadRep.salesManagerId;
+
+          if (targetCustomer) {
+            targetCustomer.assignedSalesRepresentative = lowestWorkloadRep._id;
+            targetCustomer.assignedSalesManager = lowestWorkloadRep.salesManagerId;
+            targetCustomer.assignmentStatus = 'REP_ASSIGNED';
+            targetCustomer.assignedAt = new Date();
+            await targetCustomer.save();
+          }
+        }
+      }
+    }
 
     // Validate discounts
     const { processedItems, totalBreaches, breachSummary } = await validateQuotationDiscounts(items, customerId);
@@ -118,7 +169,9 @@ const createQuotation = async (req, res) => {
     const quotation = new Quotation({
       quoteNumber,
       customer: customerId,
-      salesRep: req.user._id,
+      salesRep: assignedRepId,
+      assignedSalesManager: assignedManagerId,
+      assignmentStatus: 'REP_ASSIGNED',
       items: processedItems,
       subtotal: Number(subtotal.toFixed(2)),
       totalDiscount: Number(totalDiscount.toFixed(2)),
@@ -216,4 +269,72 @@ const submitQuotation = async (req, res) => {
   }
 };
 
-module.exports = { getQuotations, getQuotationById, createQuotation, submitQuotation };
+// @desc Customer accepts official quotation
+// @route POST /api/quotations/:id/accept
+const acceptQuotation = async (req, res) => {
+  try {
+    const quotation = await Quotation.findById(req.params.id);
+    if (!quotation) {
+      return res.status(404).json({ message: 'Quotation not found' });
+    }
+
+    if (req.user.role === 'CUSTOMER') {
+      const userCustId = req.user.customerId?._id ? req.user.customerId._id.toString() : req.user.customerId?.toString();
+      if (!userCustId || quotation.customer.toString() !== userCustId) {
+        return res.status(403).json({ message: 'Not authorized to accept this quotation' });
+      }
+    }
+
+    quotation.status = 'Confirmed';
+    quotation.approvalChainState = 'APPROVED';
+    quotation.acceptedBy = req.user._id;
+    quotation.acceptedAt = new Date();
+    await quotation.save();
+
+    res.json({ message: 'Quotation accepted successfully!', quotation });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Customer rejects official quotation
+// @route POST /api/quotations/:id/reject
+const rejectQuotation = async (req, res) => {
+  try {
+    const { rejectionReason } = req.body;
+    const quotation = await Quotation.findById(req.params.id);
+
+    if (!quotation) {
+      return res.status(404).json({ message: 'Quotation not found' });
+    }
+
+    if (req.user.role === 'CUSTOMER') {
+      const userCustId = req.user.customerId?._id ? req.user.customerId._id.toString() : req.user.customerId?.toString();
+      if (!userCustId || quotation.customer.toString() !== userCustId) {
+        return res.status(403).json({ message: 'Not authorized to reject this quotation' });
+      }
+    }
+
+    quotation.status = 'Rejected';
+    quotation.approvalChainState = 'REJECTED';
+    quotation.rejectedBy = req.user._id;
+    quotation.rejectedAt = new Date();
+    quotation.rejectionReason = rejectionReason || 'Customer rejected quotation';
+    if (rejectionReason) quotation.notes = `Customer Rejection: ${rejectionReason}`;
+
+    await quotation.save();
+
+    res.json({ message: 'Quotation rejected.', quotation });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = {
+  getQuotations,
+  getQuotationById,
+  createQuotation,
+  submitQuotation,
+  acceptQuotation,
+  rejectQuotation
+};

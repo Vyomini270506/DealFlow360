@@ -12,6 +12,7 @@ const invoiceSchema = new mongoose.Schema({
   quotation: { type: mongoose.Schema.Types.ObjectId, ref: 'Quotation', required: true },
   fulfillment: { type: mongoose.Schema.Types.ObjectId, ref: 'Fulfillment' },
   customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
+  type: { type: String, enum: ['PRODUCT', 'SUBSCRIPTION'], default: 'PRODUCT' },
   items: [invoiceItemSchema],
   subtotal: { type: Number, required: true },
   tax: { type: Number, required: true, default: 0 },

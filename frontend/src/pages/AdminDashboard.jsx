@@ -1,8 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import API from '../services/api';
 import KPICard from '../components/KPICard';
-import { Settings, Users, Package, Warehouse as WarehouseIcon, Percent, Sliders, Shield, Save, Plus } from 'lucide-react';
+import { Settings, Users, Package, Warehouse as WarehouseIcon, Percent, Sliders, Shield, Save, Plus, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
+
+const AdminWorkloadMonitor = () => {
+  return (
+    <div className="glass-panel rounded-2xl p-5 space-y-3 border-l-4 border-l-primary">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-extrabold text-foreground uppercase tracking-wider flex items-center gap-2">
+            <Users className="w-4 h-4 text-primary" />
+            Automatic Least-Workload Quotation Assignment Engine
+          </h2>
+          <p className="text-xs text-muted-foreground">New customer quotation requests are automatically assigned to the Sales Rep with the lowest active workload</p>
+        </div>
+        <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/30">
+          Backend Engine Active
+        </span>
+      </div>
+    </div>
+  );
+};
 
 const AdminDashboard = () => {
   const [config, setConfig] = useState({ discountTiers: [], categoryLimits: [] });
@@ -88,6 +107,9 @@ const AdminDashboard = () => {
         <KPICard title="Warehouses" value={warehouses.length} subtitle="Logistics hubs" icon={WarehouseIcon} color="cyan" />
         <KPICard title="Discount Policy Tiers" value="3 Tiers" subtitle="Bronze, Silver, Gold" icon={Percent} color="amber" />
       </div>
+
+      {/* AUTOMATIC LEAST-WORKLOAD ASSIGNMENT ENGINE STATUS */}
+      <AdminWorkloadMonitor />
 
       {/* Editable Discount Tiers & Category Limits Section */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">

@@ -37,6 +37,13 @@ const getInvoiceById = async (req, res) => {
       return res.status(404).json({ message: 'Invoice not found' });
     }
 
+    if (req.user.role === 'CUSTOMER') {
+      const userCustId = req.user.customerId?._id ? req.user.customerId._id.toString() : req.user.customerId?.toString();
+      if (!userCustId || invoice.customer._id.toString() !== userCustId) {
+        return res.status(403).json({ message: 'Not authorized to view this invoice' });
+      }
+    }
+
     res.json(invoice);
   } catch (error) {
     res.status(500).json({ message: error.message });
