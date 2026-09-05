@@ -242,12 +242,12 @@ const seedData = async () => {
       customer: customerDocA._id,
       user: customerUserA._id,
       assignedSalesRep: salesRepA._id,
-      items: [{ product: products[0]._id, quantity: 5, desiredDiscountPercent: 12 }],
+      items: [{ product: products[0]._id, quantity: 5, desiredDiscountPercent: 4 }],
       message: 'Need 5 Business Laptops for our engineering team.',
       status: 'Submitted',
       riskScore: 10,
       riskLevel: 'LOW',
-      riskReasons: ['Standard discount within Gold tier limit']
+      riskReasons: ['Standard discount within Gold tier limit (5%)']
     });
 
     const req2 = await CustomerRequest.create({
@@ -257,10 +257,38 @@ const seedData = async () => {
       assignedSalesRep: salesRepB._id,
       items: [{ product: products[1]._id, quantity: 2, desiredDiscountPercent: 18 }],
       message: 'Requesting 18% discount for enterprise rack servers.',
-      status: 'Quoted',
-      riskScore: 80,
+      status: 'Escalated_Manager',
+      riskScore: 85,
       riskLevel: 'HIGH',
-      riskReasons: ['Discount (18%) exceeds Silver tier limit (10%) by 8 points.']
+      riskReasons: ['Discount (18%) exceeds Silver tier limit (10%) by 8 points.', 'High order value'],
+      escalationReason: 'Discount exceeds baseline silver tier limit. Compulsory manager approval required.'
+    });
+
+    const req3 = await CustomerRequest.create({
+      requestNumber: 'REQ-1003',
+      customer: customerDocC._id,
+      user: customerUserC._id,
+      assignedSalesRep: salesRepC._id,
+      items: [{ product: products[2]._id, quantity: 10, desiredDiscountPercent: 12 }],
+      message: 'Bulk discount request for 10 monitors.',
+      status: 'Escalated_Manager',
+      riskScore: 55,
+      riskLevel: 'MEDIUM',
+      riskReasons: ['Discount (12%) exceeds Bronze tier limit (5%) by 7 points.'],
+      escalationReason: 'Medium risk bulk order discount escalation for Sales Manager B.'
+    });
+
+    const req4 = await CustomerRequest.create({
+      requestNumber: 'REQ-1004',
+      customer: customerDocD._id,
+      user: customerUserD._id,
+      assignedSalesRep: salesRepA._id,
+      items: [{ product: products[3]._id, quantity: 1, desiredDiscountPercent: 5 }],
+      message: 'Annual license renewal request.',
+      status: 'Submitted',
+      riskScore: 15,
+      riskLevel: 'LOW',
+      riskReasons: ['Low risk standard SaaS license request']
     });
 
     console.log('Seeding Quotations (Linked to Demo Users)...');
