@@ -188,6 +188,99 @@ const FinanceOperationsDashboard = () => {
 
       </div>
 
+      {/* Invoices & Subscriptions Operational Overview Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* Invoices List */}
+        <div className="glass-panel rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <FileCheck2 className="w-4 h-4 text-cyan-400" />
+              Invoices & Payment Status ({invoices.length})
+            </h2>
+          </div>
+          {invoices.length === 0 ? (
+            <p className="text-xs text-slate-500 italic py-4 text-center">No invoices recorded yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800">
+                  <tr>
+                    <th className="p-2.5">Invoice Ref</th>
+                    <th className="p-2.5">Customer</th>
+                    <th className="p-2.5">Amount</th>
+                    <th className="p-2.5">Payment</th>
+                    <th className="p-2.5">Delivery</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 bg-slate-900/40">
+                  {invoices.map((inv) => (
+                    <tr key={inv._id} className="hover:bg-slate-800/40 transition">
+                      <td className="p-2.5 font-bold text-white">{inv.invoiceNumber}</td>
+                      <td className="p-2.5 font-semibold text-slate-200">{inv.customer?.company || inv.customer?.name}</td>
+                      <td className="p-2.5 font-extrabold text-cyan-300">₹{inv.grandTotal?.toLocaleString()}</td>
+                      <td className="p-2.5">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          inv.paymentStatus === 'PAID' || inv.paymentStatus === 'Paid' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                        }`}>
+                          {inv.paymentStatus}
+                        </span>
+                      </td>
+                      <td className="p-2.5">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+                          {inv.deliveryStatus || 'PENDING'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Subscriptions List */}
+        <div className="glass-panel rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <Repeat className="w-4 h-4 text-emerald-400" />
+              Active Subscriptions ({subscriptions.length})
+            </h2>
+          </div>
+          {subscriptions.length === 0 ? (
+            <p className="text-xs text-slate-500 italic py-4 text-center">No active subscriptions found.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800">
+                  <tr>
+                    <th className="p-2.5">Sub Ref</th>
+                    <th className="p-2.5">Customer</th>
+                    <th className="p-2.5">Plan / Service</th>
+                    <th className="p-2.5">Amount</th>
+                    <th className="p-2.5">Next Billing</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 bg-slate-900/40">
+                  {subscriptions.map((s) => (
+                    <tr key={s._id} className="hover:bg-slate-800/40 transition">
+                      <td className="p-2.5 font-bold text-white">{s.subscriptionNumber}</td>
+                      <td className="p-2.5 font-semibold text-slate-200">{s.customer?.company || s.customer?.name}</td>
+                      <td className="p-2.5 text-slate-300">{s.planName}</td>
+                      <td className="p-2.5 font-extrabold text-emerald-300">₹{s.amount?.toLocaleString()}</td>
+                      <td className="p-2.5 text-slate-400">
+                        {s.nextBillingDate ? new Date(s.nextBillingDate).toLocaleDateString() : 'N/A'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+      </div>
+
       {/* Modals */}
       <ApprovalModal
         isOpen={!!selectedApproval}

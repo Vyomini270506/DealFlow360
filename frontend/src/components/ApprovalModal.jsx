@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import API from '../services/api';
 import { toast } from 'sonner';
-import { X, CheckCircle, XCircle, RotateCcw, ShieldAlert, History, MessageSquare, ShoppingCart, FileText } from 'lucide-react';
+import { X, CheckCircle, XCircle, RotateCcw, ShieldAlert, History, MessageSquare, ShoppingCart, FileText, ThumbsUp, ThumbsDown, HelpCircle, MessageCircle } from 'lucide-react';
 import { RiskBadge } from './StatusBadge';
+import { useAuth } from '../context/AuthContext';
 
 const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
+  const { user } = useAuth();
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -29,8 +31,31 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
       toast.success(`Approval decision '${actionType}' processed successfully`);
       onSuccess();
       onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleFinanceOpinion = async (decision) => {
+    setSubmitting(true);
+    try {
+      const reqId = custReq?._id || approval.customerRequest?._id || approval.customerRequest;
+      if (reqId) {
+        await API.post(`/customer-requests/${reqId}/finance-action`, {
+          decision,
+          comment: reason || `Finance opinion: ${decision}`
+        });
+      } else {
+        await API.post(`/approvals/${approval._id}/action`, {
+          action: decision === 'SUPPORT' ? 'APPROVE' : 'RETURN_FOR_CHANGES',
+          reason: `Finance opinion: ${decision}. ${reason}`
+        });
+      }
+      toast.success(`Finance opinion '${decision}' recorded! Submitted to Sales Manager for final decision.`);
+      onSuccess();
+      onClose();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to process approval');
+      toast.error(err.response?.data?.message || 'Failed to submit Finance opinion');
     } finally {
       setSubmitting(false);
     }
@@ -207,50 +232,114 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
             </div>
           </div>
 
-          {/* DECISION REASON TEXTAREA */}
-          <div>
-            <label className="block text-xs font-bold text-foreground mb-1">Approval Decision Rationale / Comments</label>
-            <textarea
-              rows="2"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Enter manager decision notes or feedback..."
-              className="w-full bg-card border border-border rounded-xl p-2.5 text-xs text-foreground focus:border-primary focus:outline-none"
-            />
-          </div>
+          {/* DECISION REASON TEXTAREA (Hidden for ADMIN) */}
+          {user?.role !== 'ADMIN' ? (
+            <div>
+              <label className="block text-xs font-bold text-foreground mb-1">Approval Decision Rationale / Comments</label>
+              <textarea
+                rows="2"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Enter manager decision notes or feedback..."
+                className="w-full bg-card border border-border rounded-xl p-2.5 text-xs text-foreground focus:border-primary focus:outline-none"
+              />
+            </div>
+          ) : (
+            <div className="p-3 rounded-xl bg-primary/10 border border-primary/30 text-xs font-semibold text-primary flex items-center justify-between">
+              <span>🔒 Read-Only Audit View Active: Admin monitors approval history without decision capabilities.</span>
+            </div>
+          )}
 
         </div>
 
         {/* Action Buttons */}
-        <div className="p-4 border-t border-border bg-muted/30 flex items-center justify-between">
-          <button
-            type="button"
-            disabled={submitting}
-            onClick={() => handleAction('RETURN_FOR_CHANGES')}
-            className="px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20 transition flex items-center gap-1.5"
-          >
-            <RotateCcw className="w-3.5 h-3.5" /> Return for Changes
-          </button>
-
-          <div className="flex items-center gap-3">
+        {user?.role === 'ADMIN' ? (
+          <div className="p-4 border-t border-border bg-muted/30 flex items-center justify-between">
+            <div className="text-xs font-bold text-muted-foreground flex items-center gap-1.5">
+              <span>Read-Only Platform Audit Log</span>
+            </div>
             <button
               type="button"
-              disabled={submitting}
-              onClick={() => handleAction('REJECT')}
-              className="px-4 py-2 text-xs font-bold rounded-xl bg-rose-500 hover:bg-rose-600 text-white transition flex items-center gap-1.5 shadow"
+              onClick={onClose}
+              className="px-5 py-2 text-xs font-bold rounded-xl bg-primary hover:bg-primary-hover text-white transition shadow"
             >
-              <XCircle className="w-3.5 h-3.5" /> Reject Deal
-            </button>
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => handleAction('APPROVE')}
-              className="px-5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shadow"
-            >
-              <CheckCircle className="w-3.5 h-3.5" /> Approve Quotation
+              Close History View
             </button>
           </div>
-        </div>
+        ) : user?.role === 'FINANCE_OPERATIONS' ? (
+          <div className="p-4 border-t border-border bg-indigo-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="text-[11px] font-bold text-indigo-400">
+              💡 Finance Opinion only. Final decision remains with Sales Manager.
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleFinanceOpinion('SUPPORT')}
+                className="px-3.5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shadow"
+              >
+                <ThumbsUp className="w-3.5 h-3.5" /> Support Deal
+              </button>
+
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleFinanceOpinion('DO_NOT_SUPPORT')}
+                className="px-3.5 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition flex items-center gap-1.5 shadow"
+              >
+                <ThumbsDown className="w-3.5 h-3.5" /> Do Not Support
+              </button>
+
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleFinanceOpinion('SUGGEST_CHANGES')}
+                className="px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-600 text-white transition flex items-center gap-1.5 shadow"
+              >
+                <HelpCircle className="w-3.5 h-3.5" /> Suggest Changes
+              </button>
+
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleFinanceOpinion('COMMENT')}
+                className="px-3.5 py-2 text-xs font-bold rounded-xl bg-card border border-border text-foreground hover:bg-muted transition flex items-center gap-1.5"
+              >
+                <MessageCircle className="w-3.5 h-3.5 text-primary" /> Add Comment
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 border-t border-border bg-muted/30 flex items-center justify-between">
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => handleAction('RETURN_FOR_CHANGES')}
+              className="px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 hover:bg-amber-500/20 transition flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Return for Changes
+            </button>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleAction('REJECT')}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-rose-500 hover:bg-rose-600 text-white transition flex items-center gap-1.5 shadow"
+              >
+                <XCircle className="w-3.5 h-3.5" /> Reject Deal
+              </button>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => handleAction('APPROVE')}
+                className="px-5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shadow"
+              >
+                <CheckCircle className="w-3.5 h-3.5" /> Approve Quotation
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

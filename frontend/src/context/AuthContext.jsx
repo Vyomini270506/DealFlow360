@@ -40,6 +40,58 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const sendOtp = async (email, type = 'REGISTER') => {
+    try {
+      const { data } = await API.post('/auth/send-otp', { email, type });
+      toast.success(`🔐 Verification OTP sent to ${email}! Please check your inbox.`);
+      return data;
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Failed to send OTP code.';
+      toast.error(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const register = async (userData) => {
+    try {
+      const { data } = await API.post('/auth/register', userData);
+      localStorage.setItem('dealflow_token', data.token);
+      setUser(data);
+      toast.success(`🎉 Account created! Welcome, ${data.name}`);
+      return data;
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Registration failed. Check details.';
+      toast.error(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const loginWithOtp = async (email, otp) => {
+    try {
+      const { data } = await API.post('/auth/login-otp', { email, otp });
+      localStorage.setItem('dealflow_token', data.token);
+      setUser(data);
+      toast.success(`Welcome back, ${data.name}! Logged in via OTP verification.`);
+      return data;
+    } catch (err) {
+      const msg = err.response?.data?.message || 'OTP verification failed.';
+      toast.error(msg);
+      throw new Error(msg);
+    }
+  };
+
+  const resetPassword = async (email, otp, newPassword) => {
+    try {
+      const { data } = await API.post('/auth/reset-password', { email, otp, newPassword });
+      toast.success(data.message || 'Password reset successfully!');
+      return data;
+    } catch (err) {
+      const msg = err.response?.data?.message || 'Password reset failed.';
+      toast.error(msg);
+      throw new Error(msg);
+    }
+  };
+
   // Quick Demo Login for Hackathon Evaluators
   const quickLogin = async (role) => {
     const demoAccounts = {
@@ -63,7 +115,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, quickLogin, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, sendOtp, register, loginWithOtp, resetPassword, quickLogin, logout }}>
       {children}
     </AuthContext.Provider>
   );

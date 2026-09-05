@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { 
@@ -9,44 +9,50 @@ import {
   FileCheck2, 
   Repeat, 
   Activity, 
-  Settings, 
   MessageSquare,
-  Users,
   Briefcase,
   ShoppingCart,
   CreditCard,
   UserCheck,
-  Send
+  Send,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  ShieldAlert,
+  Award
 } from 'lucide-react';
 
 const Sidebar = () => {
-  const { user } = useAuth();
-  if (!user) return null;
+  const { user, logout } = useAuth();
+  const [collapsed, setCollapsed] = useState(false);
 
+  if (!user) return null;
   const role = user.role;
 
-  // Common links based on role
   const getNavLinks = () => {
     switch (role) {
       case 'SALES_REP':
         return [
           { name: 'Dashboard', path: '/sales-rep?tab=dashboard', icon: LayoutDashboard },
-          { name: 'Customer Requests', path: '/sales-rep?tab=requests', icon: ShoppingCart },
+          { name: 'Requests', path: '/sales-rep?tab=requests', icon: ShoppingCart },
           { name: 'Quotations', path: '/sales-rep?tab=quotations', icon: FileText },
           { name: 'Negotiations', path: '/sales-rep?tab=negotiations', icon: MessageSquare },
+          { name: 'Closed Deals', path: '/closed-deals', icon: Award },
           { name: 'Profile', path: '/sales-rep?tab=profile', icon: UserCheck },
         ];
       case 'SALES_MANAGER':
         return [
           { name: 'Dashboard', path: '/sales-manager', icon: LayoutDashboard },
           { name: 'Team Quotations', path: '/quotations', icon: FileText },
-          { name: 'Pending Approvals', path: '/approvals', icon: CheckSquare },
+          { name: 'Approvals', path: '/approvals', icon: CheckSquare },
+          { name: 'Closed Deals', path: '/closed-deals', icon: Award },
           { name: 'Deal Health', path: '/deal-health', icon: Activity },
         ];
       case 'FINANCE_OPERATIONS':
         return [
           { name: 'Dashboard', path: '/finance', icon: LayoutDashboard },
           { name: 'High-Risk Approvals', path: '/approvals', icon: CheckSquare },
+          { name: 'Closed Deals', path: '/closed-deals', icon: Award },
           { name: 'Fulfillment & Stock', path: '/fulfillment', icon: Truck },
           { name: 'Invoices & Billing', path: '/invoices', icon: FileCheck2 },
           { name: 'Subscriptions', path: '/subscriptions', icon: Repeat },
@@ -57,6 +63,7 @@ const Sidebar = () => {
           { name: 'Requests', path: '/customer-portal?tab=requests', icon: ShoppingCart },
           { name: 'Quotations', path: '/customer-portal?tab=quotations', icon: FileText },
           { name: 'Negotiation Corner', path: '/customer-portal?tab=negotiations', icon: MessageSquare },
+          { name: 'Closed Deals', path: '/closed-deals', icon: Award },
           { name: 'Billing', path: '/customer-portal?tab=billing', icon: CreditCard },
           { name: 'Messages', path: '/customer-portal?tab=messages', icon: Send },
           { name: 'Profile', path: '/customer-portal?tab=profile', icon: UserCheck },
@@ -64,10 +71,11 @@ const Sidebar = () => {
       case 'ADMIN':
         return [
           { name: 'Admin Console', path: '/admin', icon: LayoutDashboard },
-          { name: 'All Quotations', path: '/quotations', icon: FileText },
-          { name: 'Approvals Queue', path: '/approvals', icon: CheckSquare },
+          { name: 'Request & Platform History', path: '/admin?tab=requests_history', icon: FileCheck2 },
+          { name: 'Approvals Audit Log', path: '/approvals', icon: CheckSquare },
+          { name: 'Closed Deals', path: '/closed-deals', icon: Award },
           { name: 'Fulfillment', path: '/fulfillment', icon: Truck },
-          { name: 'Billing & Invoices', path: '/invoices', icon: FileCheck2 },
+          { name: 'Invoices & Billing', path: '/invoices', icon: FileCheck2 },
           { name: 'Subscriptions', path: '/subscriptions', icon: Repeat },
           { name: 'Deal Health', path: '/deal-health', icon: Activity },
         ];
@@ -79,52 +87,107 @@ const Sidebar = () => {
   const navLinks = getNavLinks();
 
   return (
-    <aside className="w-64 bg-[#0d1322] border-r border-slate-800/80 min-h-screen flex flex-col justify-between p-4 select-none">
+    <aside
+      className={`bg-[#0D111A] border-r border-[#242C3A] min-h-screen flex flex-col justify-between transition-all duration-200 relative select-none z-40 ${
+        collapsed ? 'w-20 p-3' : 'w-64 p-4'
+      }`}
+    >
+      {/* Collapse Toggle Button */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="absolute -right-3.5 top-7 w-7 h-7 rounded-full bg-[#111722] border border-[#242C3A] text-[#A7B0C0] hover:text-[#F5F7FA] flex items-center justify-center shadow-lg transition-transform hover:scale-105"
+        title={collapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+      >
+        {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+      </button>
+
       <div>
         {/* Brand Logo */}
-        <div className="flex items-center gap-3 px-3 py-3 mb-6 border-b border-slate-800/60">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+        <div className={`flex items-center gap-3 py-3 mb-5 border-b border-[#242C3A] ${collapsed ? 'justify-center px-0' : 'px-2'}`}>
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#6366F1] to-[#22D3EE] flex items-center justify-center shadow-md shadow-[#6366F1]/20 shrink-0">
             <Briefcase className="w-5 h-5 text-white" />
           </div>
-          <div>
-            <h1 className="font-extrabold text-lg text-white tracking-tight leading-none">DealFlow<span className="text-indigo-400">360</span></h1>
-            <p className="text-[10px] text-emerald-400 font-semibold tracking-wider uppercase mt-1">Sales Ops AI Platform</p>
+          {!collapsed && (
+            <div className="overflow-hidden">
+              <h1 className="font-extrabold text-base text-[#F5F7FA] tracking-tight leading-none flex items-center gap-1">
+                DealFlow<span className="text-[#818CF8]">360</span>
+              </h1>
+              <p className="text-[9px] text-[#A7B0C0] font-semibold tracking-widest uppercase mt-1">Enterprise B2B SaaS</p>
+            </div>
+          )}
+        </div>
+
+        {/* Role Pill */}
+        {!collapsed && (
+          <div className="px-3 py-2 mb-4 rounded-xl bg-[#111722] border border-[#242C3A] flex items-center justify-between">
+            <span className="text-[11px] font-medium text-[#687386]">Active Role</span>
+            <span className="text-[10px] font-extrabold text-[#818CF8] uppercase tracking-wider px-2 py-0.5 rounded-md bg-[#6366F1]/10 border border-[#6366F1]/30">
+              {role.replace('_', ' ')}
+            </span>
           </div>
-        </div>
+        )}
 
-        {/* User Active Role Pill */}
-        <div className="px-3 py-2 mb-4 rounded-lg bg-slate-900/80 border border-slate-800 flex items-center justify-between">
-          <span className="text-xs text-slate-400">Role</span>
-          <span className="text-xs font-bold text-indigo-400 uppercase tracking-wide px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-800/50">
-            {role.replace('_', ' ')}
-          </span>
-        </div>
-
-        {/* Navigation Items */}
+        {/* Navigation Item List */}
         <nav className="space-y-1">
           {navLinks.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                `flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all relative ${
+                  collapsed ? 'justify-center' : ''
+                } ${
                   isActive
-                    ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 shadow-md shadow-indigo-900/20'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                    ? 'bg-[#6366F1]/15 text-[#F5F7FA] border border-[#6366F1]/30 font-bold'
+                    : 'text-[#A7B0C0] hover:text-[#F5F7FA] hover:bg-[#111722]/80'
                 }`
               }
+              title={collapsed ? item.name : undefined}
             >
-              <item.icon className="w-4 h-4" />
-              <span>{item.name}</span>
+              {({ isActive }) => (
+                <>
+                  <item.icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#818CF8]' : 'text-[#687386]'}`} />
+                  {!collapsed && <span>{item.name}</span>}
+                  {isActive && !collapsed && (
+                    <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[#818CF8]" />
+                  )}
+                </>
+              )}
             </NavLink>
           ))}
         </nav>
       </div>
 
-      {/* Footer Info */}
-      <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-800/50 text-[11px] text-slate-500">
-        <p className="font-semibold text-slate-400">DealFlow360 Enterprise</p>
-        <p className="mt-0.5">Automated B2B Operations Engine v1.0</p>
+      {/* Profile & Logout Section at Bottom */}
+      <div className={`pt-4 border-t border-[#242C3A] ${collapsed ? 'text-center' : ''}`}>
+        {!collapsed ? (
+          <div className="p-3 rounded-xl bg-[#111722] border border-[#242C3A] flex items-center justify-between">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-[#6366F1] to-[#22D3EE] flex items-center justify-center text-white font-extrabold text-xs shrink-0 shadow">
+                {user.name ? user.name.charAt(0) : 'U'}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-[#F5F7FA] truncate">{user.name}</p>
+                <p className="text-[10px] text-[#687386] truncate">{user.email}</p>
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              className="p-1.5 rounded-lg text-[#687386] hover:text-[#EF4444] hover:bg-[#EF4444]/10 border border-transparent hover:border-[#EF4444]/30 transition"
+              title="Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={logout}
+            className="w-10 h-10 mx-auto rounded-xl bg-[#111722] border border-[#242C3A] text-[#687386] hover:text-[#EF4444] flex items-center justify-center transition"
+            title="Sign Out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        )}
       </div>
     </aside>
   );

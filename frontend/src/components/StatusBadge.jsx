@@ -2,36 +2,44 @@ import React from 'react';
 
 export const StatusBadge = ({ status }) => {
   const styles = {
-    'Draft': 'bg-slate-800 text-slate-300 border-slate-700',
-    'Pending Approval': 'bg-amber-950/60 text-amber-400 border-amber-800/60 animate-pulse',
-    'Approved': 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60',
-    'Rejected': 'bg-rose-950/60 text-rose-400 border-rose-800/60',
-    'Negotiation': 'bg-indigo-950/60 text-indigo-400 border-indigo-800/60',
-    'Confirmed': 'bg-cyan-950/60 text-cyan-400 border-cyan-800/60',
-    'Fulfillment': 'bg-blue-950/60 text-blue-400 border-blue-800/60',
-    'Completed': 'bg-purple-950/60 text-purple-400 border-purple-800/60',
+    'Draft': 'bg-[#94A3B8]/10 text-[#94A3B8] border-[#94A3B8]/30',
+    'Submitted': 'bg-[#6366F1]/10 text-[#818CF8] border-[#6366F1]/30',
+    'Processing': 'bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30',
+    'Quoted': 'bg-[#6366F1]/10 text-[#818CF8] border-[#6366F1]/30',
+    'Pending Approval': 'bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30',
+    'Approved': 'bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/30',
+    'Rejected': 'bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/30',
+    'Negotiation': 'bg-[#6366F1]/10 text-[#818CF8] border-[#6366F1]/30',
+    'Negotiation_Required': 'bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30',
+    'Active': 'bg-[#6366F1]/10 text-[#818CF8] border-[#6366F1]/30',
+    'Confirmed': 'bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/30',
+    'Closed': 'bg-[#94A3B8]/10 text-[#94A3B8] border-[#94A3B8]/30',
+    'CLOSED': 'bg-[#94A3B8]/10 text-[#94A3B8] border-[#94A3B8]/30',
+    'Fulfillment': 'bg-[#6366F1]/10 text-[#818CF8] border-[#6366F1]/30',
+    'Completed': 'bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/30',
   };
 
-  const currentStyle = styles[status] || 'bg-slate-800 text-slate-300 border-slate-700';
+  const currentStyle = styles[status] || 'bg-[#94A3B8]/10 text-[#94A3B8] border-[#94A3B8]/30';
 
   return (
-    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${currentStyle}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${currentStyle}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current" />
       {status}
     </span>
   );
 };
 
 export const RiskBadge = ({ level, score }) => {
-  let style = 'bg-emerald-950/60 text-emerald-400 border-emerald-800/60';
+  let style = 'bg-[#22C55E]/10 text-[#22C55E] border-[#22C55E]/30';
   if (level === 'HIGH' || score >= 60) {
-    style = 'bg-rose-950/60 text-rose-400 border-rose-800/60 shadow-[0_0_12px_rgba(244,63,94,0.3)]';
+    style = 'bg-[#EF4444]/10 text-[#EF4444] border-[#EF4444]/30';
   } else if (level === 'MEDIUM' || score >= 30) {
-    style = 'bg-amber-950/60 text-amber-400 border-amber-800/60';
+    style = 'bg-[#F59E0B]/10 text-[#F59E0B] border-[#F59E0B]/30';
   }
 
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${style}`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border font-mono-numeric ${style}`}>
+      <span className="w-1.5 h-1.5 rounded-full bg-current" />
       {level || (score >= 60 ? 'HIGH' : score >= 30 ? 'MEDIUM' : 'LOW')} ({score ?? 0})
     </span>
   );

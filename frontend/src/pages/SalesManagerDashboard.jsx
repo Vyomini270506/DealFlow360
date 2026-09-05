@@ -118,16 +118,67 @@ const SalesManagerDashboard = () => {
       comment = window.prompt('Enter negotiation instructions for Sales Representative (e.g., Discount too high, negotiate max 10%):');
       if (comment === null) return;
     }
+
+    let maxDisc = null;
+    if (action === 'APPROVE' || action === 'REQUEST_CHANGES') {
+      const inputDisc = window.prompt('Optional: Set Manager Max Authorized Discount Ceiling (%) for negotiations (e.g. 10):');
+      if (inputDisc && !isNaN(Number(inputDisc))) {
+        maxDisc = Number(inputDisc);
+      }
+    }
+
     try {
       await API.post(`/customer-requests/${requestId}/manager-action`, {
         action,
-        comment: comment || (action === 'APPROVE' ? 'Approved by Sales Manager' : 'Rejected by Sales Manager')
+        comment: comment || (action === 'APPROVE' ? 'Approved by Sales Manager' : 'Rejected by Sales Manager'),
+        maxAllowedDiscount: maxDisc
       });
 
       toast.success(`Manager decision '${action}' saved successfully!`);
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Manager action failed');
+    }
+  };
+
+  const handleSendToFinance = async (requestId) => {
+    const reason = window.prompt('Enter context / reason for mandatory Finance Review:') || 'High Risk request escalated for mandatory Finance review';
+    try {
+      await API.post(`/customer-requests/${requestId}/send-to-finance`, { reason });
+      toast.success('High Risk request sent to Finance/Operations for mandatory review!');
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to send to Finance');
+    }
+  };
+
+  const handleProcessQuotationApproval = async (approvalId, action) => {
+    let reason = '';
+    if (action === 'RETURN_FOR_CHANGES' || action === 'REJECT') {
+      reason = window.prompt(`Enter reason for ${action}:`) || '';
+      if (reason === null) return;
+    } else {
+      reason = window.prompt('Optional approval note:') || 'Approved by Sales Manager';
+    }
+
+    let maxDisc = null;
+    if (action === 'APPROVE' || action === 'RETURN_FOR_CHANGES') {
+      const inputDisc = window.prompt('Optional Manager Max Authorized Discount Ceiling (%):');
+      if (inputDisc && !isNaN(Number(inputDisc))) {
+        maxDisc = Number(inputDisc);
+      }
+    }
+
+    try {
+      await API.post(`/approvals/${approvalId}/action`, {
+        action,
+        reason,
+        maxAllowedDiscount: maxDisc
+      });
+      toast.success(`Quotation approval action '${action}' recorded!`);
+      fetchData();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Approval action failed');
     }
   };
 
@@ -153,11 +204,15 @@ const SalesManagerDashboard = () => {
   const approvedCount = customerRequests.filter(r => (r.status === 'Approved_Manager' || r.status === 'Quoted') && r.status !== 'Closed' && r.status !== 'CLOSED').length + approvals.filter(a => a.managerApproval?.status === 'APPROVED').length;
   const rejectedCount = customerRequests.filter(r => r.status === 'Rejected_Manager').length + approvals.filter(a => a.managerApproval?.status === 'REJECTED').length;
 
-  // Filtered Requests Queue
+  // Filtered Requests Queue (Only include requests that require Manager action: MEDIUM, HIGH, or Escalated_Manager)
   const filteredRequests = customerRequests.filter(r => {
+    // Exclude unescalated LOW risk requests from Manager Queue (LOW risk is Sales Rep authority)
+    if (r.riskLevel === 'LOW' && r.status !== 'Escalated_Manager' && r.status !== 'Approved_Manager' && r.status !== 'Rejected_Manager' && r.status !== 'Negotiation_Required') {
+      return false;
+    }
     if (filterStatus === 'CLOSED') return r.status === 'Closed' || r.status === 'CLOSED';
     if (r.status === 'Closed' || r.status === 'CLOSED') return false;
-    if (filterStatus === 'PENDING') return r.status === 'Escalated_Manager' || r.status === 'Pending';
+    if (filterStatus === 'PENDING') return r.status === 'Escalated_Manager' || r.status === 'WAITING_FOR_FINANCE' || (r.riskLevel === 'MEDIUM' && (r.status === 'Pending' || r.status === 'Submitted'));
     if (filterStatus === 'MEDIUM') return r.riskLevel === 'MEDIUM';
     if (filterStatus === 'HIGH') return r.riskLevel === 'HIGH';
     if (filterStatus === 'APPROVED') return r.status === 'Approved_Manager' || r.status === 'Quoted';
@@ -314,6 +369,16 @@ const SalesManagerDashboard = () => {
                           CHANGES REQUESTED 💬
                         </span>
                       )}
+                      {reqItem.status === 'WAITING_FOR_FINANCE' && (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+                          FINANCE REVIEW ⏳
+                        </span>
+                      )}
+                      {reqItem.status === 'FINANCE_REVIEWED' && (
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                          FINANCE OPINION ADDED ✓
+                        </span>
+                      )}
                       {(reqItem.status === 'Escalated_Manager' || reqItem.status === 'Pending' || reqItem.status === 'Submitted') && (
                         <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
                           PENDING REVIEW ⏳
@@ -333,31 +398,83 @@ const SalesManagerDashboard = () => {
                         <Eye className="w-3.5 h-3.5 text-primary" /> View
                       </button>
 
-                      {reqItem.status !== 'Approved_Manager' && reqItem.status !== 'Quoted' && (
-                        <button
-                          onClick={() => handleManagerRequestAction(reqItem._id, 'APPROVE')}
-                          className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" /> Approve
-                        </button>
+                      {/* HIGH RISK: Must be sent to Finance for review first if not yet reviewed */}
+                      {reqItem.riskLevel === 'HIGH' && reqItem.status !== 'FINANCE_REVIEWED' && reqItem.status !== 'Approved_Manager' && reqItem.status !== 'Quoted' && (
+                        <>
+                          {reqItem.status === 'WAITING_FOR_FINANCE' ? (
+                            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+                              Waiting for Finance Review ⏳
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleSendToFinance(reqItem._id)}
+                              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" /> Send to Finance (Required)
+                            </button>
+                          )}
+                        </>
                       )}
 
-                      {reqItem.status !== 'Negotiation_Required' && reqItem.status !== 'Quoted' && (
-                        <button
-                          onClick={() => handleManagerRequestAction(reqItem._id, 'REQUEST_CHANGES')}
-                          className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" /> Request Changes
-                        </button>
+                      {/* If HIGH RISK and FINANCE REVIEWED: Display opinion and allow Manager decision */}
+                      {reqItem.riskLevel === 'HIGH' && reqItem.status === 'FINANCE_REVIEWED' && (
+                        <div className="inline-flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            reqItem.financeDecision === 'SUPPORT' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-500 border border-rose-500/30'
+                          }`}>
+                            Finance Opinion: {reqItem.financeDecision}
+                          </span>
+                          <button
+                            onClick={() => handleManagerRequestAction(reqItem._id, 'APPROVE')}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" /> Approve
+                          </button>
+                          <button
+                            onClick={() => handleManagerRequestAction(reqItem._id, 'REQUEST_CHANGES')}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" /> Request Changes
+                          </button>
+                          <button
+                            onClick={() => handleManagerRequestAction(reqItem._id, 'REJECT')}
+                            className="px-2.5 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                          >
+                            <XCircle className="w-3.5 h-3.5" /> Reject
+                          </button>
+                        </div>
                       )}
 
-                      {reqItem.status !== 'Rejected_Manager' && reqItem.status !== 'Quoted' && (
-                        <button
-                          onClick={() => handleManagerRequestAction(reqItem._id, 'REJECT')}
-                          className="px-2.5 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                        >
-                          <XCircle className="w-3.5 h-3.5" /> Reject
-                        </button>
+                      {/* MEDIUM RISK & ESCALATED REQUESTS: Manager decisions */}
+                      {(reqItem.riskLevel === 'MEDIUM' || reqItem.status === 'Escalated_Manager') && (
+                        <>
+                          {reqItem.status !== 'Approved_Manager' && reqItem.status !== 'Quoted' && (
+                            <button
+                              onClick={() => handleManagerRequestAction(reqItem._id, 'APPROVE')}
+                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5" /> Approve
+                            </button>
+                          )}
+
+                          {reqItem.status !== 'Negotiation_Required' && reqItem.status !== 'Quoted' && (
+                            <button
+                              onClick={() => handleManagerRequestAction(reqItem._id, 'REQUEST_CHANGES')}
+                              className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" /> Request Changes
+                            </button>
+                          )}
+
+                          {reqItem.status !== 'Rejected_Manager' && reqItem.status !== 'Quoted' && (
+                            <button
+                              onClick={() => handleManagerRequestAction(reqItem._id, 'REJECT')}
+                              className="px-2.5 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                            >
+                              <XCircle className="w-3.5 h-3.5" /> Reject
+                            </button>
+                          )}
+                        </>
                       )}
 
                       <button
@@ -365,6 +482,77 @@ const SalesManagerDashboard = () => {
                         className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 font-bold text-xs inline-flex items-center gap-1 transition"
                       >
                         <Trash2 className="w-3.5 h-3.5" /> Discard
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* QUOTATION APPROVALS QUEUE (QUOTATION PROPOSALS SUBMITTED BY SALES REPS) */}
+      <div className="glass-panel rounded-2xl p-6 space-y-4 border-l-4 border-l-indigo-500">
+        <div className="border-b border-border pb-4">
+          <h2 className="text-base font-extrabold text-foreground uppercase tracking-wider flex items-center gap-2">
+            <FileText className="w-5 h-5 text-indigo-500" />
+            Quotation Approvals Queue
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">Official sales quotations submitted by Sales Representatives requiring Sales Manager authorization before release to customer</p>
+        </div>
+
+        {approvals.filter(a => a.managerApproval?.status === 'PENDING').length === 0 ? (
+          <div className="py-8 text-center bg-card rounded-xl border border-border">
+            <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-80" />
+            <p className="text-xs font-bold text-muted-foreground">No pending quotation approvals in your queue.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-foreground">
+              <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
+                <tr>
+                  <th className="p-3">Quotation / Request</th>
+                  <th className="p-3">Sales Rep</th>
+                  <th className="p-3">Customer Account</th>
+                  <th className="p-3">Requested Discount</th>
+                  <th className="p-3">Risk Assessment</th>
+                  <th className="p-3 text-right">Manager Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border bg-card">
+                {approvals.filter(a => a.managerApproval?.status === 'PENDING').map((app) => (
+                  <tr key={app._id} className="hover:bg-muted/50 transition">
+                    <td className="p-3 font-bold text-primary">
+                      {app.quotation?.quoteNumber || app.customerRequest?.requestNumber || 'Approval Record'}
+                    </td>
+                    <td className="p-3 font-bold text-foreground">{app.salesRep?.name || 'Sales Rep'}</td>
+                    <td className="p-3 text-muted-foreground">
+                      <p className="font-bold text-foreground">{app.customer?.company || app.customer?.name}</p>
+                      <p className="text-[10px] text-amber-500 font-semibold">{app.customer?.tier || 'Gold'} Tier</p>
+                    </td>
+                    <td className="p-3 font-extrabold text-amber-500">{app.requestedDiscount || 0}% Disc</td>
+                    <td className="p-3">
+                      <RiskBadge level={app.riskLevel} score={app.riskScore} />
+                    </td>
+                    <td className="p-3 text-right space-x-1.5">
+                      <button
+                        onClick={() => handleProcessQuotationApproval(app._id, 'APPROVE')}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" /> Approve Quote
+                      </button>
+                      <button
+                        onClick={() => handleProcessQuotationApproval(app._id, 'RETURN_FOR_CHANGES')}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" /> Request Changes
+                      </button>
+                      <button
+                        onClick={() => handleProcessQuotationApproval(app._id, 'REJECT')}
+                        className="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                      >
+                        <XCircle className="w-3.5 h-3.5" /> Reject
                       </button>
                     </td>
                   </tr>

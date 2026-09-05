@@ -23,7 +23,9 @@ import {
   Clock,
   Building2,
   ShieldCheck,
-  Trash2
+  Trash2,
+  CreditCard,
+  Repeat
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -38,6 +40,8 @@ const SalesRepDashboard = () => {
   const [quotations, setQuotations] = useState([]);
   const [customerRequests, setCustomerRequests] = useState([]);
   const [negotiations, setNegotiations] = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [subscriptions, setSubscriptions] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -52,15 +56,19 @@ const SalesRepDashboard = () => {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const [qRes, reqRes, negRes] = await Promise.all([
+      const [qRes, reqRes, negRes, invRes, subRes] = await Promise.all([
         API.get('/quotations'),
         API.get('/customer-requests').catch(() => ({ data: [] })),
-        API.get('/negotiations/sales-rep').catch(() => ({ data: [] }))
+        API.get('/negotiations/sales-rep').catch(() => ({ data: [] })),
+        API.get('/invoices').catch(() => ({ data: [] })),
+        API.get('/subscriptions').catch(() => ({ data: [] }))
       ]);
 
       setQuotations(qRes.data || []);
       setCustomerRequests(reqRes.data || []);
       setNegotiations(negRes.data || []);
+      setInvoices(invRes.data || []);
+      setSubscriptions(subRes.data || []);
     } catch (err) {
       toast.error('Failed to load Sales Representative dashboard data');
     } finally {
@@ -170,7 +178,7 @@ const SalesRepDashboard = () => {
 
   const activeCustomerRequests = customerRequests.filter(r => r.status !== 'DISCARDED' && r.status !== 'Closed' && r.status !== 'CLOSED');
   const activeQuotationsList = quotations.filter(q => q.status !== 'DISCARDED' && q.status !== 'Closed' && q.status !== 'CLOSED');
-  const activeNegotiationsList = negotiations.filter(n => n.status !== 'INACTIVE' && n.status !== 'Closed' && n.status !== 'CLOSED' && n.quotation?.status !== 'Closed' && n.quotation?.status !== 'CLOSED');
+  const activeNegotiationsList = negotiations.filter(n => n.quotation && n.status !== 'INACTIVE' && n.status !== 'Closed' && n.status !== 'CLOSED' && n.quotation?.status !== 'Closed' && n.quotation?.status !== 'CLOSED');
   const closedQuotationsList = quotations.filter(q => q.status === 'Closed' || q.status === 'CLOSED');
 
   const pendingApprovalsCount = activeQuotationsList.filter(q => q.status === 'Pending Approval').length;
@@ -261,6 +269,19 @@ const SalesRepDashboard = () => {
           <span>Closed Deals</span>
           {closedQuotationsList.length > 0 && (
             <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-bold">{closedQuotationsList.length}</span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('billing')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition shrink-0 ${
+            activeTab === 'billing' ? 'bg-primary text-white shadow-md' : 'text-muted-foreground hover:text-foreground hover:bg-card/50'
+          }`}
+        >
+          <CreditCard className="w-4 h-4" />
+          <span>Billing & Subscriptions</span>
+          {invoices.length > 0 && (
+            <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-bold">{invoices.length}</span>
           )}
         </button>
 
@@ -360,11 +381,11 @@ const SalesRepDashboard = () => {
                     {activeNegotiationsList.slice(0, 3).map((n) => (
                       <div key={n._id} className="p-3 rounded-xl bg-card border border-border flex items-center justify-between">
                         <div>
-                          <p className="text-xs font-bold text-foreground">{n.quotation?.quoteNumber || 'Quotation'}</p>
-                          <p className="text-[11px] text-muted-foreground">{n.customer?.company || 'Customer'}</p>
+                          <p className="text-xs font-bold text-foreground">{n.quotation?.quoteNumber || `Request #${n.customerRequest?.requestNumber}`}</p>
+                          <p className="text-[11px] text-muted-foreground">{n.customer?.company || n.customer?.name || ''}</p>
                         </div>
                         <button
-                          onClick={() => setActiveNegotiationId(n.quotation?._id || n.quotation)}
+                          onClick={() => setActiveNegotiationId(n._id)}
                           className="px-2.5 py-1 rounded-lg bg-amber-500 text-white font-bold text-[11px] shadow"
                         >
                           Review Thread
@@ -893,6 +914,128 @@ const SalesRepDashboard = () => {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* TAB: BILLING & SUBSCRIPTIONS */}
+      {activeTab === 'billing' && (
+        <div className="glass-panel rounded-2xl p-6 space-y-6">
+          <div className="border-b border-border pb-4">
+            <h2 className="text-base font-extrabold text-foreground flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-primary" />
+              Customer Invoices & Recurring Subscriptions
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">View billing records, payment status, delivery status, and subscriptions belonging strictly to your assigned customer accounts.</p>
+          </div>
+
+          {/* Subscriptions Section */}
+          <div className="space-y-4">
+            <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider flex items-center gap-2">
+              <Repeat className="w-4 h-4 text-emerald-500" />
+              Assigned Customer Subscriptions ({subscriptions.length})
+            </h3>
+            {subscriptions.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">No active subscriptions for your assigned customers.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-foreground">
+                  <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
+                    <tr>
+                      <th className="p-3">Ref</th>
+                      <th className="p-3">Customer</th>
+                      <th className="p-3">Service Plan</th>
+                      <th className="p-3">Amount</th>
+                      <th className="p-3">Billing Cycle</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Next Billing Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border bg-card">
+                    {subscriptions.map(s => (
+                      <tr key={s._id} className="hover:bg-muted/50 transition">
+                        <td className="p-3 font-mono font-bold text-primary">{s.subscriptionNumber}</td>
+                        <td className="p-3 font-bold text-foreground">{s.customer?.company || s.customer?.name}</td>
+                        <td className="p-3 font-semibold">{s.planName}</td>
+                        <td className="p-3 font-extrabold text-emerald-500">₹{s.amount?.toLocaleString()}</td>
+                        <td className="p-3 text-muted-foreground">{s.billingFrequency || s.billingCycle}</td>
+                        <td className="p-3">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                            s.status === 'ACTIVE' || s.status === 'Active' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-500 border border-rose-500/30'
+                          }`}>
+                            {s.status}
+                          </span>
+                        </td>
+                        <td className="p-3 text-muted-foreground">
+                          {s.nextBillingDate ? new Date(s.nextBillingDate).toLocaleDateString() : 'N/A'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Product Invoices Section */}
+          <div className="space-y-4 pt-4 border-t border-border">
+            <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-amber-500" />
+              Assigned Customer Invoices ({invoices.length})
+            </h3>
+            {invoices.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic">No invoices issued for your assigned customers.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-foreground">
+                  <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
+                    <tr>
+                      <th className="p-3">Invoice Ref</th>
+                      <th className="p-3">Customer</th>
+                      <th className="p-3">Items Shipped</th>
+                      <th className="p-3">Grand Total</th>
+                      <th className="p-3">Payment Status</th>
+                      <th className="p-3">Delivery Status</th>
+                      <th className="p-3">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border bg-card">
+                    {invoices.map(inv => (
+                      <tr key={inv._id} className="hover:bg-muted/50 transition">
+                        <td className="p-3 font-bold text-primary">{inv.invoiceNumber}</td>
+                        <td className="p-3 font-bold text-foreground">{inv.customer?.company || inv.customer?.name}</td>
+                        <td className="p-3">
+                          {inv.items?.map((item, idx) => (
+                            <div key={idx} className="text-xs">
+                              <span className="font-bold">{item.shippedQuantity}x</span> {item.product?.name || 'Product'}
+                            </div>
+                          ))}
+                        </td>
+                        <td className="p-3 font-extrabold text-foreground text-sm">₹{inv.grandTotal?.toLocaleString()}</td>
+                        <td className="p-3">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                            inv.paymentStatus === 'PAID' || inv.paymentStatus === 'Paid' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' : 'bg-amber-500/10 text-amber-500 border border-amber-500/30'
+                          }`}>
+                            {inv.paymentStatus}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                            inv.deliveryStatus === 'DELIVERED' || inv.deliveryStatus === 'SHIPPED' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30'
+                          }`}>
+                            {inv.deliveryStatus || 'PENDING'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-muted-foreground">
+                          {inv.createdAt ? new Date(inv.createdAt).toLocaleDateString() : 'N/A'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
         </div>
       )}
 

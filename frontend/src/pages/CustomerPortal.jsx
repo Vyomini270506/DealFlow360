@@ -58,6 +58,9 @@ const CustomerPortal = () => {
   const [rejectModalQuote, setRejectModalQuote] = useState(null);
   const [rejectionReason, setRejectionReason] = useState('');
   
+  const [withdrawModalReq, setWithdrawModalReq] = useState(null);
+  const [submittingWithdraw, setSubmittingWithdraw] = useState(false);
+  
   const [openNegModalQuote, setOpenNegModalQuote] = useState(null);
   const [openNegDiscount, setOpenNegDiscount] = useState('');
   const [openNegMessage, setOpenNegMessage] = useState('');
@@ -108,12 +111,12 @@ const CustomerPortal = () => {
         API.get('/messages').catch(() => ({ data: { assignedRep: null, messages: [] } }))
       ]);
 
-      setCustomerRequests(reqRes.data || []);
-      setQuotations(qRes.data || []);
+      setCustomerRequests((reqRes.data || []).filter(r => r.status !== 'DISCARDED'));
+      setQuotations((qRes.data || []).filter(q => q.status !== 'DISCARDED'));
       setInvoices(invRes.data || []);
       setSubscriptions(subRes.data || []);
       setCustomerInfo(repRes.data || null);
-      setNegotiationCorner(negRes.data || []);
+      setNegotiationCorner((negRes.data || []).filter(n => n.quotation && n.status !== 'DISCARDED' && n.status !== 'INACTIVE' && n.status !== 'Closed'));
       setChatMessages(msgRes.data?.messages || []);
     } catch (err) {
       toast.error('Failed to load customer portal data');
@@ -165,6 +168,24 @@ const CustomerPortal = () => {
     }
   };
 
+  const handleModifyAndResendRequest = (reqItem) => {
+    if (reqItem && reqItem.items && reqItem.items.length > 0) {
+      const formatted = reqItem.items.map((item) => ({
+        product: item.product?._id || item.product,
+        quantity: item.quantity || 1,
+        desiredDiscountPercent: item.desiredDiscountPercent || 0
+      }));
+      setRequestItems(formatted);
+    }
+    setRequestMessage(
+      reqItem?.managerComment
+        ? `Resubmitted modified request addressing feedback: ${reqItem.managerComment}`
+        : 'Resubmitted modified request with updated demands.'
+    );
+    setIsRequestModalOpen(true);
+    toast.info(`Pre-filled products from request ${reqItem?.requestNumber || ''}. Update your demands and click Send Request.`);
+  };
+
   const handleConfirmAcceptQuotation = async () => {
     if (!acceptModalQuote) return;
     try {
@@ -192,6 +213,21 @@ const CustomerPortal = () => {
     }
   };
 
+  const handleConfirmWithdrawRequest = async () => {
+    if (!withdrawModalReq) return;
+    setSubmittingWithdraw(true);
+    try {
+      await API.post(`/customer-requests/${withdrawModalReq._id}/withdraw`);
+      toast.info(`Request ${withdrawModalReq.requestNumber} withdrawn successfully.`);
+      setWithdrawModalReq(null);
+      fetchCustomerData();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to withdraw request');
+    } finally {
+      setSubmittingWithdraw(false);
+    }
+  };
+
   const handleOpenQuotationNegotiation = async (quotationId) => {
     try {
       const { data } = await API.get(`/negotiations/quotation/${quotationId}`);
@@ -200,6 +236,17 @@ const CustomerPortal = () => {
       }
     } catch (err) {
       toast.error('Failed to open quotation negotiation thread');
+    }
+  };
+
+  const handleOpenRequestNegotiation = async (requestId) => {
+    try {
+      const { data } = await API.get(`/negotiations/customer-request/${requestId}`);
+      if (data && data._id) {
+        setActiveNegotiationId(data._id);
+      }
+    } catch (err) {
+      toast.error('Failed to open request negotiation thread');
     }
   };
 
@@ -246,25 +293,7 @@ const CustomerPortal = () => {
     }
   };
 
-  const handleDiscardRequest = async (requestId) => {
-    try {
-      await API.post(`/customer-requests/${requestId}/discard`);
-      toast.info('Request discarded and moved to Discarded Records.');
-      fetchCustomerData();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to discard request');
-    }
-  };
 
-  const handleDiscardQuotation = async (quotationId) => {
-    try {
-      await API.post(`/quotations/${quotationId}/discard`);
-      toast.info('Quotation discarded and moved to Discarded Records.');
-      fetchCustomerData();
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to discard quotation');
-    }
-  };
 
   const handleSendChatMessage = async (e) => {
     e.preventDefault();
@@ -285,9 +314,10 @@ const CustomerPortal = () => {
 
   const assignedRep = customerInfo?.assignedSalesRepresentative;
   const pendingRequestsCount = customerRequests.filter(r => r.status === 'Submitted' || r.status === 'Processing').length;
-  const activeNegotiationsCount = negotiationCorner.filter(n => n.status === 'Open' || n.status === 'Re-approval Required').length;
+  const activeNegotiationsCount = negotiationCorner.filter(n => n.quotation && n.status !== 'Closed' && n.status !== 'Resolved' && n.status !== 'INACTIVE' && n.status !== 'DISCARDED').length;
   const unpaidInvoicesCount = invoices.filter(i => i.paymentStatus !== 'Paid').length;
   const activeSubscriptionsCount = subscriptions.filter(s => s.status === 'Active' || s.status === 'Trialing').length;
+  const rejectedRequestsCount = customerRequests.filter(r => r.status?.toLowerCase().includes('reject')).length;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -296,12 +326,16 @@ const CustomerPortal = () => {
       <div className="bg-gradient-to-r from-indigo-600/15 via-card to-emerald-500/15 p-6 rounded-2xl border border-border flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-bold text-success uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-success/10 border border-success/30">
-              {customerInfo?.tier || 'Gold Tier'}
-            </span>
-            <span className="text-xs font-semibold text-muted-foreground">ID: {customerInfo?._id || 'AUTO'}</span>
+            {customerInfo?.tier && (
+              <span className="text-xs font-bold text-success uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-success/10 border border-success/30">
+                {customerInfo.tier} Tier
+              </span>
+            )}
+            {customerInfo?._id && (
+              <span className="text-xs font-semibold text-muted-foreground">ID: {customerInfo._id}</span>
+            )}
           </div>
-          <h1 className="text-2xl font-extrabold text-foreground mt-1.5">{customerInfo?.name || 'Customer Portal'}</h1>
+          <h1 className="text-2xl font-extrabold text-foreground mt-1.5">{customerInfo?.company || customerInfo?.name || 'Customer Portal'}</h1>
           <p className="text-xs text-muted-foreground font-medium">Manage product requests, review official sales quotations, and handle billing</p>
         </div>
 
@@ -312,12 +346,12 @@ const CustomerPortal = () => {
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <span className="text-xs font-extrabold text-foreground">{assignedRep?.name || 'Assigned Representative'}</span>
+              <span className="text-xs font-extrabold text-foreground">{assignedRep?.name || 'Unassigned'}</span>
               <span className="text-[9px] font-bold text-emerald-500 uppercase bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30">
-                Online
+                Active
               </span>
             </div>
-            <p className="text-[10px] text-muted-foreground font-medium">{assignedRep?.email || 'salesrep@dealflow360.com'}</p>
+            {assignedRep?.email && <p className="text-[10px] text-muted-foreground font-medium">{assignedRep.email}</p>}
           </div>
         </div>
       </div>
@@ -414,13 +448,16 @@ const CustomerPortal = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('discarded')}
+          onClick={() => setActiveTab('rejected')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition shrink-0 ${
-            activeTab === 'discarded' ? 'bg-rose-600 text-white shadow-md' : 'text-rose-400 hover:text-rose-300 hover:bg-card/50'
+            activeTab === 'rejected' ? 'bg-rose-600 text-white shadow-md' : 'text-rose-400 hover:text-rose-300 hover:bg-card/50'
           }`}
         >
-          <Trash2 className="w-4 h-4" />
-          <span>Discarded Records</span>
+          <XCircle className="w-4 h-4" />
+          <span>Rejected Requests</span>
+          {rejectedRequestsCount > 0 && (
+            <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded-full bg-white/20 text-white font-bold">{rejectedRequestsCount}</span>
+          )}
         </button>
       </div>
 
@@ -461,7 +498,11 @@ const CustomerPortal = () => {
                   <div className="mt-4 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-primary">{customerRequests[0].requestNumber}</span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-primary/10 text-primary border border-primary/30">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        customerRequests[0].status?.toLowerCase().includes('reject')
+                          ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30'
+                          : 'bg-primary/10 text-primary border border-primary/30'
+                      }`}>
                         {customerRequests[0].status}
                       </span>
                     </div>
@@ -471,6 +512,11 @@ const CustomerPortal = () => {
                     <p className="text-xs text-muted-foreground">
                       Desired Discount: <span className="font-bold text-foreground">{customerRequests[0].items?.map(i => `${i.desiredDiscountPercent}%`).join(', ')}</span>
                     </p>
+                    {customerRequests[0].status?.toLowerCase().includes('reject') && (customerRequests[0].managerComment || customerRequests[0].escalationReason) && (
+                      <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-medium">
+                        <strong>Rejection Reason:</strong> {customerRequests[0].managerComment || customerRequests[0].escalationReason}
+                      </div>
+                    )}
                     <p className="text-[11px] text-muted-foreground">
                       Submitted: {new Date(customerRequests[0].createdAt).toLocaleDateString()}
                     </p>
@@ -478,14 +524,31 @@ const CustomerPortal = () => {
                 )}
               </div>
 
-              <button
-                onClick={() => {
-                  setIsRequestModalOpen(true);
-                }}
-                className="w-full py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2"
-              >
-                <Plus className="w-4 h-4" /> Submit New Product Request
-              </button>
+              {customerRequests[0]?.status?.toLowerCase().includes('reject') ? (
+                <div className="flex flex-col gap-2 pt-2">
+                  <button
+                    onClick={() => handleModifyAndResendRequest(customerRequests[0])}
+                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-2 shadow"
+                  >
+                    <RotateCcw className="w-4 h-4" /> Modify & Send Request
+                  </button>
+                  <button
+                    onClick={() => setWithdrawModalReq(customerRequests[0])}
+                    className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2"
+                  >
+                    <XCircle className="w-4 h-4" /> Stop / Close Request
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setIsRequestModalOpen(true);
+                  }}
+                  className="w-full py-2 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-bold text-xs rounded-xl transition flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Submit New Product Request
+                </button>
+              )}
             </div>
 
             {/* Latest Official Quotation Overview Card */}
@@ -591,6 +654,20 @@ const CustomerPortal = () => {
             </button>
           </div>
 
+          {customerRequests.some(r => r.status?.toLowerCase().includes('reject')) && (
+            <div className="bg-rose-500/10 border border-rose-500/30 p-4 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-rose-500 mb-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase tracking-wide">Request Rejected Action Required</h4>
+                  <p className="text-xs font-medium text-foreground/80 mt-0.5">
+                    One or more of your product requests were rejected. You can either <strong className="text-foreground">Modify & Send</strong> a new request with updated demands or <strong className="text-foreground">Stop/Close</strong> the request.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {customerRequests.length === 0 ? (
             <div className="p-10 text-center bg-card rounded-2xl border border-border space-y-3">
               <ShoppingCart className="w-10 h-10 text-muted-foreground mx-auto opacity-50" />
@@ -617,44 +694,167 @@ const CustomerPortal = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border bg-card">
-                  {customerRequests.filter(r => r.status !== 'DISCARDED').map((reqItem) => (
-                    <tr key={reqItem._id} className="hover:bg-muted/50 transition">
-                      <td className="p-3.5 font-bold text-primary">{reqItem.requestNumber}</td>
-                      <td className="p-3.5">
-                        {reqItem.items?.map((i, idx) => (
-                          <div key={idx} className="text-xs">
-                            <span className="font-extrabold text-foreground">{i.quantity}x</span> {i.product?.name || 'Product'}
-                          </div>
-                        ))}
-                      </td>
-                      <td className="p-3.5 font-bold text-foreground">
-                        {reqItem.items?.map(i => `${i.desiredDiscountPercent}%`).join(', ')}
-                      </td>
-                      <td className="p-3.5 font-semibold text-muted-foreground">
-                        {reqItem.assignedSalesRep?.name || assignedRep?.name || 'Assigned Rep'}
-                      </td>
-                      <td className="p-3.5">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                          reqItem.status === 'Quoted' ? 'bg-success/10 text-success border border-success/30' : 'bg-primary/10 text-primary border border-primary/30'
-                        }`}>
-                          {reqItem.status}
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-muted-foreground font-medium">
-                        {new Date(reqItem.createdAt).toLocaleDateString()}
-                      </td>
-                      <td className="p-3.5 text-right">
-                        <button
-                          onClick={() => handleDiscardRequest(reqItem._id)}
-                          className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 text-[11px] font-bold inline-flex items-center gap-1 transition"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" /> Discard
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {customerRequests.filter(r => r.status !== 'DISCARDED').map((reqItem) => {
+                    const isRejected = reqItem.status?.toLowerCase().includes('reject');
+                    const isWithdrawn = reqItem.status === 'WITHDRAWN' || reqItem.status === 'Cancelled';
+                    const isClosed = reqItem.status === 'Closed';
+
+                    return (
+                      <tr key={reqItem._id} className={`hover:bg-muted/50 transition ${isRejected ? 'bg-rose-500/5' : ''}`}>
+                        <td className="p-3.5 font-bold text-primary">{reqItem.requestNumber}</td>
+                        <td className="p-3.5">
+                          {reqItem.items?.map((i, idx) => (
+                            <div key={idx} className="text-xs">
+                              <span className="font-extrabold text-foreground">{i.quantity}x</span> {i.product?.name || 'Product'}
+                            </div>
+                          ))}
+                        </td>
+                        <td className="p-3.5 font-bold text-foreground">
+                          {reqItem.items?.map(i => `${i.desiredDiscountPercent}%`).join(', ')}
+                        </td>
+                        <td className="p-3.5 font-semibold text-muted-foreground">
+                          {reqItem.assignedSalesRep?.name || assignedRep?.name || 'Assigned Rep'}
+                        </td>
+                        <td className="p-3.5">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                            isRejected 
+                              ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30' 
+                              : reqItem.status === 'Quoted' 
+                              ? 'bg-success/10 text-success border border-success/30' 
+                              : reqItem.status === 'WITHDRAWN'
+                              ? 'bg-muted text-muted-foreground border border-border'
+                              : 'bg-primary/10 text-primary border border-primary/30'
+                          }`}>
+                            {reqItem.status}
+                          </span>
+                          {isRejected && (reqItem.managerComment || reqItem.escalationReason) && (
+                            <p className="text-[10px] text-rose-500 mt-1 font-medium bg-rose-500/10 px-2 py-1 rounded border border-rose-500/20 max-w-xs">
+                              Reason: {reqItem.managerComment || reqItem.escalationReason}
+                            </p>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-muted-foreground font-medium">
+                          {new Date(reqItem.createdAt).toLocaleDateString()}
+                        </td>
+                        <td className="p-3.5 text-right">
+                          {isRejected ? (
+                            <div className="inline-flex items-center gap-2 justify-end">
+                              <button
+                                onClick={() => handleModifyAndResendRequest(reqItem)}
+                                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow-sm"
+                                title="Pre-fill product request with updated demands and resubmit"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" /> Modify & Send
+                              </button>
+                              <button
+                                onClick={() => setWithdrawModalReq(reqItem)}
+                                className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 font-bold text-xs inline-flex items-center gap-1.5 transition"
+                                title="Stop and close this request"
+                              >
+                                <XCircle className="w-3.5 h-3.5" /> Stop Request
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="inline-flex items-center gap-2 justify-end">
+                              <button
+                                onClick={() => handleOpenRequestNegotiation(reqItem._id)}
+                                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 transition shadow-sm"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" /> Open Negotiation
+                              </button>
+
+                              {!isClosed && !isWithdrawn && (
+                                <button
+                                  onClick={() => setWithdrawModalReq(reqItem)}
+                                  className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 font-bold text-xs inline-flex items-center gap-1 transition"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" /> Withdraw Request
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB FOR REJECTED REQUESTS (REQUIREMENT 5) */}
+      {activeTab === 'rejected' && (
+        <div className="glass-panel rounded-2xl p-6 space-y-6">
+          <div className="border-b border-border pb-4">
+            <h2 className="text-base font-extrabold text-rose-500 flex items-center gap-2">
+              <XCircle className="w-5 h-5 text-rose-500" />
+              Rejected Customer Requests
+            </h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Review rejected requests, feedback reasons, and choose to either <strong className="text-foreground">Modify & Send</strong> a new request with updated demands or <strong className="text-foreground">Stop Request</strong>.
+            </p>
+          </div>
+
+          {customerRequests.filter(r => r.status?.toLowerCase().includes('reject')).length === 0 ? (
+            <div className="p-10 text-center bg-card rounded-2xl border border-border space-y-2">
+              <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto opacity-50" />
+              <p className="text-xs font-bold text-muted-foreground">No rejected requests found in your account.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {customerRequests.filter(r => r.status?.toLowerCase().includes('reject')).map((reqItem) => (
+                <div key={reqItem._id} className="p-5 rounded-2xl bg-card border border-rose-500/30 space-y-4 shadow-sm">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-primary text-sm">{reqItem.requestNumber}</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/30">
+                          {reqItem.status}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Submitted on {new Date(reqItem.createdAt).toLocaleDateString()} &bull; Rejected by {reqItem.status === 'Rejected_Manager' ? 'Sales Manager' : (reqItem.assignedSalesRep?.name || 'Sales Representative')}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => handleModifyAndResendRequest(reqItem)}
+                        className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
+                      >
+                        <RotateCcw className="w-4 h-4" /> Option 1 — Modify & Send New Request
+                      </button>
+                      <button
+                        onClick={() => setWithdrawModalReq(reqItem)}
+                        className="px-3.5 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 font-bold text-xs inline-flex items-center gap-1.5 transition"
+                      >
+                        <XCircle className="w-4 h-4" /> Option 2 — Stop Request
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                    <div className="space-y-1 bg-muted/50 p-3 rounded-xl">
+                      <h4 className="font-bold text-foreground">Requested Products & Demands</h4>
+                      {reqItem.items?.map((item, idx) => (
+                        <div key={idx} className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{item.quantity}x {item.product?.name || 'Product'}</span>
+                          <span className="font-bold text-foreground">{item.desiredDiscountPercent}% Target Discount</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="space-y-1 bg-rose-500/10 p-3 rounded-xl border border-rose-500/20 text-rose-500">
+                      <h4 className="font-bold uppercase tracking-wider text-[11px]">Rejection Reason & Feedback</h4>
+                      <p className="text-xs font-semibold text-foreground/90">
+                        {reqItem.managerComment || reqItem.escalationReason || 'Request rejected by Sales team due to margin policy limits.'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -744,14 +944,6 @@ const CustomerPortal = () => {
                             </button>
                           </>
                         )}
-
-                        {/* Discard Button */}
-                        <button
-                          onClick={() => handleDiscardQuotation(q._id)}
-                          className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-500 font-bold text-xs inline-flex items-center gap-1 transition"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" /> Discard
-                        </button>
                       </td>
                     </tr>
                   ))}
@@ -785,17 +977,22 @@ const CustomerPortal = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {negotiationCorner.map((neg) => {
                   const q = neg.quotation;
-                  if (!q) return null;
-                  const isRejected = q.status === 'Rejected' || neg.status === 'Rejected';
+                  const reqItem = neg.customerRequest;
+                  if (!q && !reqItem) return null;
+
+                  const title = q ? q.quoteNumber : `Request #${reqItem?.requestNumber || 'Thread'}`;
+                  const subtext = q ? `Total: ₹${q.grandTotal?.toLocaleString()}` : `Products: ${reqItem?.items?.map(i => `${i.quantity}x ${i.product?.name || 'Product'}`).join(', ') || 'N/A'}`;
+                  const currentStatus = q ? q.status : (reqItem ? reqItem.status : neg.status);
+                  const isRejected = (q && q.status === 'Rejected') || (reqItem && reqItem.status === 'Rejected') || neg.status === 'Rejected';
 
                   return (
                     <div key={neg._id} className="p-4 rounded-xl bg-card border border-border space-y-3 shadow-sm hover:border-amber-500/50 transition">
                       <div className="flex items-center justify-between border-b border-border pb-2">
                         <div>
-                          <span className="text-xs font-bold text-primary">{q.quoteNumber}</span>
-                          <p className="text-[11px] text-muted-foreground font-semibold">Total: ₹{q.grandTotal?.toLocaleString()}</p>
+                          <span className="text-xs font-bold text-primary">{title}</span>
+                          <p className="text-[11px] text-muted-foreground font-semibold">{subtext}</p>
                         </div>
-                        <StatusBadge status={q.status} />
+                        <StatusBadge status={currentStatus} />
                       </div>
 
                       <div className="space-y-1 text-xs">
@@ -819,13 +1016,13 @@ const CustomerPortal = () => {
 
                       <div className="flex items-center justify-between pt-1">
                         <button
-                          onClick={() => setActiveNegotiationId(neg._id || q._id)}
+                          onClick={() => setActiveNegotiationId(neg._id)}
                           className="px-3 py-1.5 rounded-lg bg-muted border border-border text-foreground hover:bg-card font-bold text-xs inline-flex items-center gap-1.5 transition"
                         >
                           <MessageSquare className="w-3.5 h-3.5 text-primary" /> Open Negotiation Thread
                         </button>
 
-                        {isRejected && (
+                        {isRejected && q && (
                           <button
                             onClick={() => setReopenModalQuote(q)}
                             className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
@@ -881,10 +1078,13 @@ const CustomerPortal = () => {
           {/* Subscriptions Sub-Tab */}
           {billingSubTab === 'subscriptions' && (
             <div className="space-y-4">
-              <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider flex items-center gap-2">
-                <Repeat className="w-4 h-4 text-emerald-500" />
-                Active Recurring Subscriptions
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <Repeat className="w-4 h-4 text-emerald-500" />
+                  Active Recurring Subscriptions
+                </h3>
+                <span className="text-[11px] text-muted-foreground">Subscription = Recurring Agreement | Invoice = Periodic Bill</span>
+              </div>
 
               {subscriptions.length === 0 ? (
                 <div className="p-8 text-center bg-card rounded-xl border border-border">
@@ -896,30 +1096,75 @@ const CustomerPortal = () => {
                     <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
                       <tr>
                         <th className="p-3.5">Subscription Ref</th>
-                        <th className="p-3.5">Plan / Service Name</th>
-                        <th className="p-3.5">Billing Cycle</th>
+                        <th className="p-3.5">Service Name</th>
                         <th className="p-3.5">Recurring Amount</th>
+                        <th className="p-3.5">Billing Frequency</th>
+                        <th className="p-3.5">Start Date</th>
                         <th className="p-3.5">Next Billing Date</th>
                         <th className="p-3.5">Status</th>
+                        <th className="p-3.5 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border bg-card">
-                      {subscriptions.map((s) => (
-                        <tr key={s._id} className="hover:bg-muted/50 transition">
-                          <td className="p-3.5 font-mono font-bold text-primary">{s.subscriptionNumber}</td>
-                          <td className="p-3.5 font-bold text-foreground">{s.planName}</td>
-                          <td className="p-3.5 font-semibold text-muted-foreground">{s.billingCycle}</td>
-                          <td className="p-3.5 font-extrabold text-success text-sm">₹{s.amount?.toLocaleString()}</td>
-                          <td className="p-3.5 text-muted-foreground font-medium">
-                            {s.nextBillingDate ? new Date(s.nextBillingDate).toLocaleDateString() : 'N/A'}
-                          </td>
-                          <td className="p-3.5">
-                            <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-success/10 text-success border border-success/30">
-                              {s.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                      {subscriptions.map((s) => {
+                        const isCancelled = s.status === 'Cancelled' || s.status === 'CANCELLED';
+                        return (
+                          <tr key={s._id} className="hover:bg-muted/50 transition">
+                            <td className="p-3.5 font-mono font-bold text-primary">{s.subscriptionNumber}</td>
+                            <td className="p-3.5 font-bold text-foreground">{s.planName || s.product?.name}</td>
+                            <td className="p-3.5 font-extrabold text-emerald-500 text-sm">₹{s.amount?.toLocaleString()}</td>
+                            <td className="p-3.5 font-semibold text-muted-foreground">{s.billingFrequency || s.billingCycle || 'Monthly'}</td>
+                            <td className="p-3.5 text-muted-foreground font-medium">
+                              {s.startDate ? new Date(s.startDate).toLocaleDateString() : 'N/A'}
+                            </td>
+                            <td className="p-3.5 text-muted-foreground font-medium">
+                              {s.nextBillingDate ? new Date(s.nextBillingDate).toLocaleDateString() : 'N/A'}
+                            </td>
+                            <td className="p-3.5">
+                              <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                                isCancelled ? 'bg-rose-500/10 text-rose-500 border border-rose-500/30' : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30'
+                              }`}>
+                                {s.status}
+                              </span>
+                            </td>
+                            <td className="p-3.5 text-right space-x-2">
+                              {!isCancelled && (
+                                <>
+                                  <button
+                                    onClick={async () => {
+                                      try {
+                                        await API.post(`/subscriptions/${s._id}/generate-invoice`);
+                                        toast.success('Next recurring billing invoice generated!');
+                                        fetchCustomerData();
+                                      } catch (err) {
+                                        toast.error('Failed to generate billing invoice');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-[11px] inline-flex items-center gap-1 shadow-sm transition"
+                                  >
+                                    <Repeat className="w-3 h-3" /> Trigger Next Billing
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      if (!window.confirm('Are you sure you want to cancel this subscription? Past invoices will be preserved.')) return;
+                                      try {
+                                        await API.post(`/subscriptions/${s._id}/cancel`);
+                                        toast.info('Subscription cancelled. Historical invoices remain preserved.');
+                                        fetchCustomerData();
+                                      } catch (err) {
+                                        toast.error('Failed to cancel subscription');
+                                      }
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 font-bold text-[11px] inline-flex items-center gap-1 transition"
+                                  >
+                                    <XCircle className="w-3 h-3" /> Cancel Subscription
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -930,10 +1175,13 @@ const CustomerPortal = () => {
           {/* Product Invoices Sub-Tab */}
           {billingSubTab === 'products' && (
             <div className="space-y-4">
-              <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider flex items-center gap-2">
-                <PackageCheck className="w-4 h-4 text-amber-500" />
-                One-Time Hardware & Product Invoices
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider flex items-center gap-2">
+                  <PackageCheck className="w-4 h-4 text-amber-500" />
+                  One-Time Hardware & Product Invoices
+                </h3>
+                <span className="text-[11px] text-muted-foreground font-medium">Reconciliation Guard: Delivery Status is updated upon real stock fulfillment</span>
+              </div>
 
               {invoices.length === 0 ? (
                 <div className="p-8 text-center bg-card rounded-xl border border-border">
@@ -945,11 +1193,12 @@ const CustomerPortal = () => {
                     <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
                       <tr>
                         <th className="p-3.5">Invoice Ref</th>
-                        <th className="p-3.5">Items Shipped</th>
-                        <th className="p-3.5">Subtotal</th>
+                        <th className="p-3.5">Products / Items</th>
                         <th className="p-3.5">Grand Total</th>
                         <th className="p-3.5">Payment Status</th>
-                        <th className="p-3.5">Due Date</th>
+                        <th className="p-3.5">Delivery Status</th>
+                        <th className="p-3.5">Invoice Date</th>
+                        <th className="p-3.5 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border bg-card">
@@ -959,21 +1208,35 @@ const CustomerPortal = () => {
                           <td className="p-3.5">
                             {inv.items?.map((item, idx) => (
                               <div key={idx} className="text-xs font-medium">
-                                {item.shippedQuantity}x {item.product?.name || 'Product SKU'}
+                                <span className="font-bold text-foreground">{item.shippedQuantity}x</span> {item.product?.name || 'Product'}
                               </div>
                             ))}
                           </td>
-                          <td className="p-3.5 font-semibold text-muted-foreground">₹{inv.subtotal?.toLocaleString()}</td>
                           <td className="p-3.5 font-extrabold text-foreground text-sm">₹{inv.grandTotal?.toLocaleString()}</td>
                           <td className="p-3.5">
                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                              inv.paymentStatus === 'Paid' ? 'bg-success/10 text-success border border-success/30' : 'bg-amber-500/10 text-amber-500 border border-amber-500/30'
+                              inv.paymentStatus === 'Paid' || inv.paymentStatus === 'PAID' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' : 'bg-amber-500/10 text-amber-500 border border-amber-500/30'
                             }`}>
                               {inv.paymentStatus}
                             </span>
                           </td>
+                          <td className="p-3.5">
+                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${
+                              inv.deliveryStatus === 'DELIVERED' || inv.deliveryStatus === 'SHIPPED' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' : 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30'
+                            }`}>
+                              {inv.deliveryStatus || 'PENDING'}
+                            </span>
+                          </td>
                           <td className="p-3.5 text-muted-foreground font-medium">
-                            {inv.dueDate ? new Date(inv.dueDate).toLocaleDateString() : 'N/A'}
+                            {inv.createdAt ? new Date(inv.createdAt).toLocaleDateString() : 'N/A'}
+                          </td>
+                          <td className="p-3.5 text-right">
+                            <button
+                              onClick={() => setSelectedQuotationView(inv.quotation)}
+                              className="px-3 py-1.5 rounded-xl bg-muted border border-border text-foreground hover:bg-card font-bold text-xs inline-flex items-center gap-1 transition"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-primary" /> View Invoice
+                            </button>
                           </td>
                         </tr>
                       ))}
@@ -1117,64 +1380,7 @@ const CustomerPortal = () => {
         </div>
       )}
 
-      {/* TAB 8: DISCARDED RECORDS */}
-      {activeTab === 'discarded' && (
-        <div className="glass-panel rounded-2xl p-6 space-y-6 border-l-4 border-l-rose-500">
-          <div className="border-b border-border pb-4">
-            <h2 className="text-base font-extrabold text-rose-500 flex items-center gap-2">
-              <Trash2 className="w-5 h-5" />
-              Discarded Records & Soft-Deleted Items
-            </h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Archived requests and quotations. Soft-deleted from active workflows while maintaining complete audit logs in MongoDB.</p>
-          </div>
 
-          {/* Discarded Customer Requests */}
-          <div className="space-y-4">
-            <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider">Discarded Product Requests</h3>
-            {customerRequests.filter(r => r.status === 'DISCARDED').length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No discarded product requests.</p>
-            ) : (
-              <div className="space-y-2">
-                {customerRequests.filter(r => r.status === 'DISCARDED').map(reqItem => (
-                  <div key={reqItem._id} className="p-3.5 rounded-xl bg-card border border-rose-500/30 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-bold text-rose-400">{reqItem.requestNumber}</span>
-                      <p className="text-muted-foreground text-[11px] mt-0.5">
-                        Products: {reqItem.items?.map(i => `${i.quantity}x ${i.product?.name || 'Product'}`).join(', ')}
-                      </p>
-                    </div>
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
-                      DISCARDED
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Discarded Quotations */}
-          <div className="space-y-4 pt-4 border-t border-border">
-            <h3 className="text-xs font-extrabold text-foreground uppercase tracking-wider">Discarded Quotations</h3>
-            {quotations.filter(q => q.status === 'DISCARDED').length === 0 ? (
-              <p className="text-xs text-muted-foreground italic">No discarded quotations.</p>
-            ) : (
-              <div className="space-y-2">
-                {quotations.filter(q => q.status === 'DISCARDED').map(q => (
-                  <div key={q._id} className="p-3.5 rounded-xl bg-card border border-rose-500/30 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="font-bold text-rose-400">{q.quoteNumber}</span>
-                      <p className="text-muted-foreground text-[11px] mt-0.5">Grand Total: ₹{q.grandTotal?.toLocaleString()}</p>
-                    </div>
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
-                      DISCARDED
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* TAB 9: CLOSED DEALS */}
       {activeTab === 'closed' && (
@@ -1624,11 +1830,51 @@ const CustomerPortal = () => {
         </div>
       )}
 
+      {/* CONFIRM WITHDRAW REQUEST MODAL */}
+      {withdrawModalReq && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95 text-left">
+            <div>
+              <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
+                <XCircle className="w-5 h-5 text-rose-500" />
+                Withdraw Product Request ({withdrawModalReq.requestNumber})
+              </h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                Are you sure you want to back out and withdraw product request <strong className="text-foreground">{withdrawModalReq.requestNumber}</strong>?
+                This action will cancel the request and invalidate all associated negotiation threads.
+              </p>
+            </div>
+
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 text-xs font-semibold">
+              ⚠️ Note: The request record will be retained in your account history marked as WITHDRAWN.
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+              <button
+                type="button"
+                onClick={() => setWithdrawModalReq(null)}
+                className="px-4 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground font-bold text-xs transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={submittingWithdraw}
+                onClick={handleConfirmWithdrawRequest}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow transition inline-flex items-center gap-1.5"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span>{submittingWithdraw ? 'Withdrawing...' : 'Confirm Withdrawal'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Negotiation Drawer Component */}
       <NegotiationDrawer
         isOpen={!!activeNegotiationId}
         negotiationId={activeNegotiationId}
-        quotationId={activeNegotiationId}
         onClose={() => setActiveNegotiationId(null)}
         onSuccess={fetchCustomerData}
       />
