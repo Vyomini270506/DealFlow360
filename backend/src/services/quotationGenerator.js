@@ -67,6 +67,9 @@ const generateQuotationFromApprovedRequest = async ({ customerRequest, approvedB
     tax,
     grandTotal,
     status: 'Approved', // Sent to customer immediately
+    sellerAgreed: true, // Approval represents seller's agreement
+    customerAgreed: false,
+    salesRepConfirmed: true,
     riskScore: customerRequest.riskScore || 10,
     riskLevel: customerRequest.riskLevel || 'LOW',
     approvalChainState: 'APPROVED'
@@ -85,7 +88,18 @@ const generateQuotationFromApprovedRequest = async ({ customerRequest, approvedB
     newStatus: 'Quoted',
     performedBy: approvedByUserId,
     performerRole: userRole,
-    comment: 'Request approved and quotation generated'
+    comment: 'Request approved by authorized seller'
+  });
+
+  await logAudit({
+    recordType: 'Quotation',
+    recordId: quotation._id,
+    action: 'SELLER_AGREED',
+    previousStatus: 'Draft',
+    newStatus: 'Approved',
+    performedBy: approvedByUserId,
+    performerRole: userRole,
+    comment: 'Seller has approved terms and agreed to quotation'
   });
 
   await logAudit({

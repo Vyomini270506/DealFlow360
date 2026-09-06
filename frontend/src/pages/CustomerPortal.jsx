@@ -29,6 +29,7 @@ import {
   ArrowRight,
   CheckCircle2
 } from 'lucide-react';
+import ActivityTimeline from '../components/ActivityTimeline';
 import { toast } from 'sonner';
 
 const CustomerPortal = () => {
@@ -914,14 +915,14 @@ const CustomerPortal = () => {
                           <Eye className="w-3.5 h-3.5 text-primary" /> View
                         </button>
 
-                        {q.status !== 'Confirmed' && q.status !== 'Rejected' && (
+                        {q.status !== 'Closed' && q.status !== 'CLOSED' && q.status !== 'Confirmed' && q.status !== 'Rejected' && (
                           <>
                             {/* Accept Quotation Button */}
                             <button
                               onClick={() => setAcceptModalQuote(q)}
-                              className="px-3 py-1.5 rounded-xl bg-success hover:bg-emerald-600 text-white font-bold text-xs inline-flex items-center gap-1 transition shadow-sm"
+                              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs inline-flex items-center gap-1 transition shadow"
                             >
-                              <CheckCircle className="w-3.5 h-3.5" /> Accept Quotation
+                              <CheckCircle className="w-3.5 h-3.5" /> ACCEPT DEAL
                             </button>
 
                             {/* Open Negotiation Button */}
@@ -929,10 +930,10 @@ const CustomerPortal = () => {
                                onClick={() => handleOpenQuotationNegotiation(q._id)}
                                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 transition shadow-sm"
                              >
-                               <MessageSquare className="w-3.5 h-3.5" /> Open Negotiation
+                               <MessageSquare className="w-3.5 h-3.5" /> NEGOTIATE
                              </button>
 
-                            {/* Reject Button */}
+                            {/* Reject / Withdraw Button */}
                             <button
                               onClick={() => {
                                 setRejectModalQuote(q);
@@ -940,7 +941,7 @@ const CustomerPortal = () => {
                               }}
                               className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-500 font-bold text-xs inline-flex items-center gap-1 transition"
                             >
-                              Reject
+                              WITHDRAW
                             </button>
                           </>
                         )}
@@ -1463,6 +1464,22 @@ const CustomerPortal = () => {
               </button>
             </div>
 
+            {/* DEAL STATUS BANNER */}
+            {selectedQuotationView.status === 'Closed' || selectedQuotationView.status === 'CLOSED' ? (
+              <div className="p-4 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 space-y-1">
+                <p className="font-extrabold text-sm flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4" /> ✓ Deal Closed
+                </p>
+                <p className="text-xs text-slate-300">
+                  Both you and the seller have agreed to the final terms. This deal is now finalized and cannot be changed or negotiated further.
+                </p>
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-semibold">
+                The seller has approved these terms and sent you this quotation.
+              </div>
+            )}
+
             <div className="space-y-4 text-xs">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
@@ -1496,13 +1513,56 @@ const CustomerPortal = () => {
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
+            {/* AUDIT TIMELINE */}
+            <div className="pt-2 border-t border-border">
+              <ActivityTimeline recordType="Quotation" recordId={selectedQuotationView._id} />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-border">
               <button
                 onClick={() => setSelectedQuotationView(null)}
                 className="px-4 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground font-bold text-xs transition"
               >
                 Close
               </button>
+
+              {selectedQuotationView.status !== 'Closed' && selectedQuotationView.status !== 'CLOSED' && selectedQuotationView.status !== 'Confirmed' && selectedQuotationView.status !== 'Rejected' && (
+                <>
+                  <button
+                    onClick={() => {
+                      const q = selectedQuotationView;
+                      setSelectedQuotationView(null);
+                      setAcceptModalQuote(q);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs inline-flex items-center gap-1.5 transition shadow"
+                  >
+                    <CheckCircle className="w-4 h-4" /> ACCEPT DEAL
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const qId = selectedQuotationView._id;
+                      setSelectedQuotationView(null);
+                      handleOpenQuotationNegotiation(qId);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow-sm"
+                  >
+                    <MessageSquare className="w-4 h-4" /> NEGOTIATE
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      const q = selectedQuotationView;
+                      setSelectedQuotationView(null);
+                      setRejectModalQuote(q);
+                      setRejectionReason('');
+                    }}
+                    className="px-4 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-500 font-bold text-xs inline-flex items-center gap-1.5 transition"
+                  >
+                    WITHDRAW
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

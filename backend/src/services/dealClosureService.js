@@ -23,14 +23,41 @@ const finalizeClosedDeal = async ({ quotationId, userId, userRole }) => {
     throw new Error('Quotation not found');
   }
 
-  // 1. Mark Quotation as Closed
+  // 1. Mark Quotation as Closed with both party agreements
+  const prevStatus = quotation.status;
   quotation.status = 'Closed';
+  quotation.sellerAgreed = true;
+  quotation.customerAgreed = true;
+  quotation.customerConfirmed = true;
+  quotation.salesRepConfirmed = true;
   quotation.approvalChainState = 'APPROVED';
   if (userId) {
     quotation.acceptedBy = userId;
     quotation.acceptedAt = new Date();
   }
   await quotation.save();
+
+  await logAudit({
+    recordType: 'Quotation',
+    recordId: quotation._id,
+    action: 'BOTH_PARTIES_AGREED',
+    previousStatus: prevStatus,
+    newStatus: 'Closed',
+    performedBy: userId,
+    performerRole: userRole,
+    comment: 'Both seller and customer have agreed to final terms'
+  });
+
+  await logAudit({
+    recordType: 'Quotation',
+    recordId: quotation._id,
+    action: 'DEAL_CLOSED',
+    previousStatus: prevStatus,
+    newStatus: 'Closed',
+    performedBy: userId,
+    performerRole: userRole,
+    comment: 'Deal closed successfully'
+  });
 
   // 2. Mark Customer Request as Closed if linked
   if (quotation.customerRequest) {

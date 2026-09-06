@@ -47,6 +47,8 @@ const quotationSchema = new mongoose.Schema({
   },
   customerConfirmed: { type: Boolean, default: false },
   salesRepConfirmed: { type: Boolean, default: false },
+  sellerAgreed: { type: Boolean, default: false },
+  customerAgreed: { type: Boolean, default: false },
   riskScore: { type: Number, default: 0 },
   riskLevel: { type: String, enum: ['LOW', 'MEDIUM', 'HIGH'], default: 'LOW' },
   approvalRequired: { type: Boolean, default: false },
