@@ -6,6 +6,8 @@ const Quotation = require('../models/Quotation');
 const Approval = require('../models/Approval');
 const { validateQuotationDiscounts } = require('../services/discountValidator');
 const { calculateRiskScore } = require('../services/riskEngine');
+const { logAudit } = require('../services/auditService');
+const { generateQuotationFromApprovedRequest } = require('../services/quotationGenerator');
 
 // @desc Submit a new Customer Product Request (Automatic Least-Workload Assignment)
 // @route POST /api/customer-requests
@@ -262,17 +264,38 @@ const repActionOnRequest = async (req, res) => {
     if (action === 'APPROVE') {
       request.status = 'Approved_Rep';
       await request.save();
+
+      // Automatically create & send Quotation in MongoDB
+      const quotation = await generateQuotationFromApprovedRequest({
+        customerRequest: request,
+        approvedByUserId: req.user._id,
+        userRole: req.user.role
+      });
+
       await notifyManagersForRepAction({
         repId: req.user._id,
-        title: 'Sales Rep Request Approval',
-        message: `Sales Representative ${req.user.name || 'Rep'} approved Product Request ${request.requestNumber}`
+        title: 'Sales Rep Request Approval & Quote Generation',
+        message: `Sales Representative ${req.user.name || 'Rep'} approved Request ${request.requestNumber} and generated Quotation ${quotation.quoteNumber}`
       });
-      return res.json({ message: 'Product request approved by Sales Representative', request });
+
+      return res.json({ message: 'Product request approved by Sales Representative and Quotation generated automatically', request, quotation });
     }
 
     if (action === 'REJECT') {
       request.status = 'Rejected_Rep';
       await request.save();
+
+      await logAudit({
+        recordType: 'CustomerRequest',
+        recordId: request._id,
+        action: 'REQUEST_REJECTED',
+        previousStatus: 'Pending',
+        newStatus: 'Rejected_Rep',
+        performedBy: req.user._id,
+        performerRole: req.user.role,
+        comment: 'Request rejected by Sales Representative'
+      });
+
       await notifyManagersForRepAction({
         repId: req.user._id,
         title: 'Sales Rep Request Rejection',
@@ -511,6 +534,8 @@ const managerAction = async (req, res) => {
 
     let approval = await Approval.findOne({ customerRequest: request._id });
 
+    let quotation = null;
+
     if (action === 'APPROVE') {
       request.status = 'Approved_Manager';
       request.managerComment = comment || 'Approved by Sales Manager.';
@@ -529,6 +554,24 @@ const managerAction = async (req, res) => {
         });
         await approval.save();
       }
+
+      await logAudit({
+        recordType: 'CustomerRequest',
+        recordId: request._id,
+        action: 'MANAGER_APPROVED',
+        previousStatus: 'Escalated_Manager',
+        newStatus: 'Approved_Manager',
+        performedBy: req.user._id,
+        performerRole: req.user.role,
+        comment: comment || 'Manager approved request'
+      });
+
+      // Automatically create & send Quotation in MongoDB
+      quotation = await generateQuotationFromApprovedRequest({
+        customerRequest: request,
+        approvedByUserId: req.user._id,
+        userRole: req.user.role
+      });
     } else if (action === 'REJECT') {
       request.status = 'Rejected_Manager';
       request.managerComment = comment || 'Rejected by Sales Manager.';
@@ -547,6 +590,17 @@ const managerAction = async (req, res) => {
         });
         await approval.save();
       }
+
+      await logAudit({
+        recordType: 'CustomerRequest',
+        recordId: request._id,
+        action: 'MANAGER_REJECTED',
+        previousStatus: 'Escalated_Manager',
+        newStatus: 'Rejected_Manager',
+        performedBy: req.user._id,
+        performerRole: req.user.role,
+        comment: comment || 'Manager rejected request'
+      });
     } else if (action === 'REQUEST_CHANGES' || action === 'NEGOTIATE') {
       request.status = 'Negotiation_Required';
       request.managerComment = comment || 'Sales Manager requested negotiation/changes.';
@@ -594,7 +648,7 @@ const managerAction = async (req, res) => {
       message: `Sales Manager updated Product Request ${request.requestNumber} status to '${request.status}'. Note: "${comment || 'Decision updated'}"`
     });
 
-    res.json({ message: `Request manager decision '${action}' saved successfully`, request, approval });
+    res.json({ message: `Request manager decision '${action}' saved successfully`, request, approval, quotation });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

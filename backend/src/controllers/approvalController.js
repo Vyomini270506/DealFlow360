@@ -130,6 +130,13 @@ const processApprovalAction = async (req, res) => {
           customerRequest.status = 'Approved_Manager';
           customerRequest.managerComment = reason || 'Approved by Sales Manager';
           await customerRequest.save();
+
+          const { generateQuotationFromApprovedRequest } = require('../services/quotationGenerator');
+          await generateQuotationFromApprovedRequest({
+            customerRequest,
+            approvedByUserId: req.user._id,
+            userRole: req.user.role
+          });
         }
 
         const Negotiation = require('../models/Negotiation');

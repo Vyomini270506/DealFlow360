@@ -25,6 +25,7 @@ const DealHealth = require('../models/DealHealth');
 // Services
 const { calculateBlendedDiscountRisk } = require('../services/riskEngine');
 const { finalizeClosedDeal } = require('../services/dealClosureService');
+const { logAudit } = require('../services/auditService');
 
 dotenv.config();
 
@@ -291,7 +292,7 @@ const seedTest50 = async () => {
 
     const requestStatuses = [
       'Pending', 'Submitted', 'Processing', 'Negotiation_Required',
-      'Approved_Manager', 'Rejected_Manager', 'Withdrawn', 'Closed'
+      'Approved_Manager', 'Rejected_Manager', 'WITHDRAWN', 'Closed'
     ];
 
     const productsPool = [

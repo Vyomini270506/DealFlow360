@@ -34,6 +34,7 @@ const quotationSchema = new mongoose.Schema({
       'Draft',
       'Pending Approval',
       'Approved',
+      'Customer_Accepted',
       'Rejected',
       'Negotiation',
       'Confirmed',
@@ -44,6 +45,8 @@ const quotationSchema = new mongoose.Schema({
     ],
     default: 'Draft'
   },
+  customerConfirmed: { type: Boolean, default: false },
+  salesRepConfirmed: { type: Boolean, default: false },
   riskScore: { type: Number, default: 0 },
   riskLevel: { type: String, enum: ['LOW', 'MEDIUM', 'HIGH'], default: 'LOW' },
   approvalRequired: { type: Boolean, default: false },

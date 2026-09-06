@@ -6,6 +6,7 @@ const Quotation = require('../models/Quotation');
 const Order = require('../models/Order');
 const { allocateFulfillmentStock } = require('./fulfillmentService');
 const { updateCustomerTierByOrderCount } = require('../utils/customerTierHelper');
+const { logAudit } = require('./auditService');
 
 /**
  * Single source of truth for finalizing a closed deal.
@@ -116,6 +117,17 @@ const finalizeClosedDeal = async ({ quotationId, userId, userRole }) => {
         deliveryStatus: 'PENDING',
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
       });
+
+      await logAudit({
+        recordType: 'Invoice',
+        recordId: productInvoice._id,
+        action: 'INVOICE_CREATED',
+        previousStatus: '',
+        newStatus: 'UNPAID',
+        performedBy: userId,
+        performerRole: userRole,
+        comment: `Invoice ${invoiceNumber} generated post deal closure`
+      });
     }
   }
 
@@ -158,6 +170,17 @@ const finalizeClosedDeal = async ({ quotationId, userId, userRole }) => {
       orderStatus: statusVal,
       invoice: productInvoice?._id || null,
       fulfillment: fulfillmentRecord?._id || null
+    });
+
+    await logAudit({
+      recordType: 'Order',
+      recordId: orderRecord._id,
+      action: 'ORDER_CREATED',
+      previousStatus: '',
+      newStatus: statusVal,
+      performedBy: userId,
+      performerRole: userRole,
+      comment: `Order ${orderNumber} generated post deal closure`
     });
   }
 

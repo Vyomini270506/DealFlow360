@@ -350,7 +350,7 @@ const acceptQuotation = async (req, res) => {
     }
 
     if (quotation.status === 'Closed' || quotation.status === 'CLOSED') {
-      return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
+      return res.status(400).json({ message: 'Deal is closed & finalized. No further changes can be made.' });
     }
 
     if (req.user.role === 'CUSTOMER') {
@@ -360,19 +360,71 @@ const acceptQuotation = async (req, res) => {
       }
     }
 
-    const { finalizeClosedDeal } = require('../services/dealClosureService');
-    const result = await finalizeClosedDeal({
-      quotationId: quotation._id,
-      userId: req.user._id,
-      userRole: req.user.role
-    });
+    quotation.customerConfirmed = true;
+    quotation.acceptedBy = req.user._id;
+    quotation.acceptedAt = new Date();
 
-    res.json({
-      message: 'Quotation accepted & deal closed successfully!',
-      quotation: result.quotation,
-      invoice: result.invoice,
-      subscriptions: result.subscriptions
-    });
+    const { logAudit } = require('../services/auditService');
+
+    // Check if Sales Rep confirmation is also present or if rep/admin accepts
+    if (quotation.salesRepConfirmed || req.user.role === 'SALES_REP' || req.user.role === 'ADMIN') {
+      quotation.salesRepConfirmed = true;
+      await quotation.save();
+
+      const { finalizeClosedDeal } = require('../services/dealClosureService');
+      const result = await finalizeClosedDeal({
+        quotationId: quotation._id,
+        userId: req.user._id,
+        userRole: req.user.role
+      });
+
+      await logAudit({
+        recordType: 'Quotation',
+        recordId: quotation._id,
+        action: 'DEAL_CLOSED',
+        previousStatus: quotation.status,
+        newStatus: 'Closed',
+        performedBy: req.user._id,
+        performerRole: req.user.role,
+        comment: 'Dual confirmation complete: Deal closed and post-deal processing triggered'
+      });
+
+      return res.json({
+        message: 'Deal fully confirmed & closed! Order, invoice, and fulfillment records generated.',
+        quotation: result.quotation,
+        order: result.order,
+        invoice: result.invoice,
+        subscriptions: result.subscriptions
+      });
+    } else {
+      // Pending Sales Rep final confirmation
+      const prevStatus = quotation.status;
+      quotation.status = 'Customer_Accepted';
+      await quotation.save();
+
+      // Update linked negotiation customer confirmation if exists
+      const Negotiation = require('../models/Negotiation');
+      await Negotiation.updateMany(
+        { quotation: quotation._id },
+        { $set: { 'customerConfirmation.status': 'CONFIRMED', 'customerConfirmation.confirmedAt': new Date() } }
+      );
+
+      await logAudit({
+        recordType: 'Quotation',
+        recordId: quotation._id,
+        action: 'CUSTOMER_ACCEPTED',
+        previousStatus: prevStatus,
+        newStatus: 'Customer_Accepted',
+        performedBy: req.user._id,
+        performerRole: req.user.role,
+        comment: 'Customer accepted quotation. Pending Sales Rep final confirmation before closure.'
+      });
+
+      return res.json({
+        message: 'Quotation accepted by Customer. Awaiting Sales Representative final confirmation to close deal.',
+        quotation
+      });
+    }
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -400,6 +452,7 @@ const rejectQuotation = async (req, res) => {
       }
     }
 
+    const prevStatus = quotation.status;
     quotation.status = 'Rejected';
     quotation.approvalChainState = 'REJECTED';
     quotation.rejectedBy = req.user._id;
@@ -408,6 +461,18 @@ const rejectQuotation = async (req, res) => {
     if (rejectionReason) quotation.notes = `Customer Rejection: ${rejectionReason}`;
 
     await quotation.save();
+
+    const { logAudit } = require('../services/auditService');
+    await logAudit({
+      recordType: 'Quotation',
+      recordId: quotation._id,
+      action: 'CUSTOMER_WITHDREW',
+      previousStatus: prevStatus,
+      newStatus: 'Rejected',
+      performedBy: req.user._id,
+      performerRole: req.user.role,
+      comment: rejectionReason || 'Customer rejected quotation'
+    });
 
     res.json({ message: 'Quotation rejected.', quotation });
   } catch (error) {
@@ -441,6 +506,7 @@ const sendQuotation = async (req, res) => {
       }
     }
 
+    const prevStatus = quotation.status;
     quotation.status = 'Approved';
     quotation.approvalChainState = 'APPROVED';
     await quotation.save();
@@ -453,8 +519,19 @@ const sendQuotation = async (req, res) => {
     const { updateCustomerTierByOrderCount } = require('../utils/customerTierHelper');
     await updateCustomerTierByOrderCount(quotation.customer);
 
-    // NOTIFY SALES MANAGER AND CUSTOMER OF QUOTATION SENT
-    const { notifyManagersForRepAction, notifyCustomerAndRepOnManagerAction } = require('../utils/notificationHelper');
+    const { logAudit } = require('../services/auditService');
+    await logAudit({
+      recordType: 'Quotation',
+      recordId: quotation._id,
+      action: 'QUOTATION_SENT',
+      previousStatus: prevStatus,
+      newStatus: 'Approved',
+      performedBy: req.user._id,
+      performerRole: req.user.role,
+      comment: 'Quotation sent to Customer'
+    });
+
+    const { notifyManagersForRepAction } = require('../utils/notificationHelper');
     await notifyManagersForRepAction({
       repId: req.user._id,
       title: 'Quotation Issued to Customer',
@@ -467,7 +544,7 @@ const sendQuotation = async (req, res) => {
   }
 };
 
-// @desc Discard/Soft Delete Quotation (Available for Customer, Rep, Manager, Finance, Admin)
+// @desc Discard/Soft Delete Quotation
 // @route POST /api/quotations/:id/discard
 const discardQuotation = async (req, res) => {
   try {
@@ -479,7 +556,19 @@ const discardQuotation = async (req, res) => {
     quotation.status = 'DISCARDED';
     await quotation.save();
 
-    res.json({ message: 'Quotation discarded successfully and moved to Discarded Records', quotation });
+    const { logAudit } = require('../services/auditService');
+    await logAudit({
+      recordType: 'Quotation',
+      recordId: quotation._id,
+      action: 'QUOTATION_DISCARDED',
+      previousStatus: quotation.status,
+      newStatus: 'DISCARDED',
+      performedBy: req.user._id,
+      performerRole: req.user.role,
+      comment: 'Quotation discarded'
+    });
+
+    res.json({ message: 'Quotation discarded successfully', quotation });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -489,10 +578,7 @@ const discardQuotation = async (req, res) => {
 // @route POST /api/quotations/:id/confirm-final
 const confirmFinalDeal = async (req, res) => {
   try {
-    const quotation = await Quotation.findById(req.params.id)
-      .populate('customer')
-      .populate('items.product');
-
+    const quotation = await Quotation.findById(req.params.id);
     if (!quotation) {
       return res.status(404).json({ message: 'Quotation not found' });
     }
@@ -501,120 +587,47 @@ const confirmFinalDeal = async (req, res) => {
       return res.status(200).json({ message: 'Deal is already closed & finalized', quotation });
     }
 
-    // 1. Close Quotation
-    quotation.status = 'Closed';
-    quotation.acceptedBy = req.user._id;
-    quotation.acceptedAt = new Date();
+    quotation.salesRepConfirmed = true;
+    quotation.customerConfirmed = true; // Final confirmation confirms both ends
     await quotation.save();
 
-    // 2. Close Customer Request
-    if (quotation.customerRequest) {
-      const CustomerRequest = require('../models/CustomerRequest');
-      await CustomerRequest.findByIdAndUpdate(quotation.customerRequest, { status: 'Closed' });
-    }
+    const { finalizeClosedDeal } = require('../services/dealClosureService');
+    const result = await finalizeClosedDeal({
+      quotationId: quotation._id,
+      userId: req.user._id,
+      userRole: req.user.role
+    });
 
-    // 3. Close linked Negotiation
-    const Negotiation = require('../models/Negotiation');
-    await Negotiation.updateMany(
-      { quotation: quotation._id },
-      { 
-        $set: { 
-          status: 'Closed',
-          'customerConfirmation.status': 'CONFIRMED',
-          'salesRepConfirmation.status': 'CONFIRMED'
-        } 
-      }
-    );
+    const { logAudit } = require('../services/auditService');
+    await logAudit({
+      recordType: 'Quotation',
+      recordId: quotation._id,
+      action: 'SALES_REP_CONFIRMED',
+      previousStatus: quotation.status,
+      newStatus: 'Closed',
+      performedBy: req.user._id,
+      performerRole: req.user.role,
+      comment: 'Sales Representative confirmed final terms and closed deal'
+    });
 
-    // 4. Post-Closure Automated Workflows (Product Invoice, Subscription, Fulfillment)
-    const Product = require('../models/Product');
-    const Invoice = require('../models/Invoice');
-    const Subscription = require('../models/Subscription');
-    const { allocateFulfillmentStock } = require('../services/fulfillmentService');
-
-    let hasPhysicalProducts = false;
-    let hasRecurringServices = false;
-    const physicalItems = [];
-    const subscriptionItems = [];
-
-    for (const item of quotation.items) {
-      const prod = item.product;
-      const category = prod?.category || 'Hardware';
-
-      if (category === 'Services' || category.toLowerCase().includes('subscription') || category.toLowerCase().includes('service')) {
-        hasRecurringServices = true;
-        subscriptionItems.push(item);
-      } else {
-        hasPhysicalProducts = true;
-        physicalItems.push(item);
-      }
-    }
-
-    // Create Product Invoice & Trigger Fulfillment Allocation
-    let productInvoice = null;
-    let fulfillmentRecord = null;
-
-    if (hasPhysicalProducts || quotation.items.length > 0) {
-      fulfillmentRecord = await allocateFulfillmentStock(quotation);
-
-      const invCount = await Invoice.countDocuments();
-      const invoiceNumber = `INV-${1000 + invCount + 1}`;
-
-      const invItems = quotation.items.map(i => ({
-        product: i.product._id || i.product,
-        shippedQuantity: i.quantity,
-        unitPrice: i.finalUnitPrice || i.unitPrice,
-        lineTotal: i.lineTotal
-      }));
-
-      productInvoice = await Invoice.create({
-        invoiceNumber,
-        quotation: quotation._id,
-        fulfillment: fulfillmentRecord?._id || null,
-        customer: quotation.customer._id || quotation.customer,
-        type: 'PRODUCT',
-        items: invItems,
-        subtotal: quotation.subtotal,
-        tax: quotation.tax,
-        grandTotal: quotation.grandTotal,
-        paymentStatus: 'Unpaid',
-        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-      });
-    }
-
-    // Create Subscription if recurring service items exist
-    const createdSubscriptions = [];
-    if (hasRecurringServices) {
-      for (const sItem of subscriptionItems) {
-        const prod = sItem.product;
-        const subCount = await Subscription.countDocuments();
-        const subscriptionNumber = `SUB-${1000 + subCount + 1}`;
-
-        const sub = await Subscription.create({
-          subscriptionNumber,
-          customer: quotation.customer._id || quotation.customer,
-          product: prod._id || prod,
-          planName: prod.name || 'Recurring Service Plan',
-          billingCycle: 'Monthly',
-          amount: sItem.lineTotal,
-          status: 'Active',
-          startDate: new Date(),
-          nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-        });
-        createdSubscriptions.push(sub);
-      }
-    }
-
-    // Recalculate Customer Tier based on updated closed order count
-    const { updateCustomerTierByOrderCount } = require('../utils/customerTierHelper');
-    await updateCustomerTierByOrderCount(quotation.customer._id || quotation.customer);
+    await logAudit({
+      recordType: 'Quotation',
+      recordId: quotation._id,
+      action: 'DEAL_CLOSED',
+      previousStatus: quotation.status,
+      newStatus: 'Closed',
+      performedBy: req.user._id,
+      performerRole: req.user.role,
+      comment: 'Deal closed and post-deal processing complete'
+    });
 
     res.json({
-      message: '🎉 Deal successfully CONFIRMED & CLOSED! Quotation moved to Closed Deals.',
-      quotation,
-      invoice: productInvoice,
-      fulfillment: fulfillmentRecord,
-      subscriptions: createdSubscriptions
+      message: '🎉 Deal successfully CONFIRMED & CLOSED! Post-deal processing complete.',
+      quotation: result.quotation,
+      order: result.order,
+      invoice: result.invoice,
+      fulfillment: result.fulfillment,
+      subscriptions: result.subscriptions
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

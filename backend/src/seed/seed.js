@@ -611,7 +611,7 @@ const seedData = async () => {
     console.log('Seeding Varied Subscriptions Ledger...');
     await Subscription.create([
       {
-        subscriptionNumber: 'SUB-1001',
+        subscriptionNumber: 'SUB-2001',
         customer: customerDocA._id,
         salesRep: salesRepA._id,
         quotation: quote1._id,
@@ -628,7 +628,7 @@ const seedData = async () => {
         ]
       },
       {
-        subscriptionNumber: 'SUB-1002',
+        subscriptionNumber: 'SUB-2002',
         customer: customerDocB._id,
         salesRep: salesRepB._id,
         quotation: quote2._id,
@@ -647,7 +647,7 @@ const seedData = async () => {
         ]
       },
       {
-        subscriptionNumber: 'SUB-1003',
+        subscriptionNumber: 'SUB-2003',
         customer: customerDocC._id,
         salesRep: salesRepC._id,
         quotation: quote3._id,
@@ -664,7 +664,7 @@ const seedData = async () => {
         ]
       },
       {
-        subscriptionNumber: 'SUB-1004',
+        subscriptionNumber: 'SUB-2004',
         customer: customerDocD._id,
         salesRep: salesRepA._id,
         quotation: quote7._id,
@@ -681,7 +681,7 @@ const seedData = async () => {
         ]
       },
       {
-        subscriptionNumber: 'SUB-1005',
+        subscriptionNumber: 'SUB-2005',
         customer: customerDocB._id,
         salesRep: salesRepB._id,
         product: products[4]._id,
