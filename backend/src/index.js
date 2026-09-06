@@ -30,6 +30,8 @@ app.use('/api/messages', require('./routes/messageRoutes'));
 app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/orders', require('./routes/orderRoutes'));
 app.use('/api/audit-logs', require('./routes/auditRoutes'));
+app.use('/api/intelligence', require('./routes/dealIntelligenceRoutes'));
+app.use('/api/finance', require('./routes/financeRoutes'));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -61,6 +63,24 @@ app.get('*', (req, res, next) => {
       res.status(200).send('DealFlow360 API Server Running.');
     }
   });
+});
+
+// Global Express Error Handling Middleware
+app.use((err, req, res, next) => {
+  console.error('🔥 Global API Error Handler Caught Exception:', err.stack || err.message || err);
+  res.status(err.status || 500).json({
+    message: err.message || 'Internal Server Error',
+    error: process.env.NODE_ENV === 'development' ? err : {}
+  });
+});
+
+// Process crash safety handlers
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('⚠️ Unhandled Promise Rejection caught:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('🔥 Uncaught Exception caught:', err);
 });
 
 const PORT = process.env.PORT || 5000;

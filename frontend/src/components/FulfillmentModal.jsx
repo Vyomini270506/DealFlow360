@@ -90,7 +90,7 @@ const FulfillmentModal = ({ isOpen, fulfillmentId, onClose, onSuccess }) => {
               <div key={idx} className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-sm font-bold text-white">{item.product?.name}</h4>
+                    <h4 className="text-sm font-bold text-white">{item.product?.name || item.productName || item.product?.sku || 'Product'}</h4>
                     <p className="text-xs text-slate-400">Requested: <span className="text-slate-200 font-bold">{item.requestedQuantity}</span> units</p>
                   </div>
                   <div className="text-right">
@@ -130,7 +130,7 @@ const FulfillmentModal = ({ isOpen, fulfillmentId, onClose, onSuccess }) => {
               </div>
               {backorders.map((bo, i) => (
                 <div key={i} className="text-xs text-slate-300 flex items-center justify-between bg-slate-900/60 p-2.5 rounded border border-slate-800">
-                  <span>{bo.product?.name}</span>
+                  <span>{bo.product?.name || bo.productName || bo.product?.sku || 'Product'}</span>
                   <span className="font-bold text-rose-400">{bo.quantity} units needed</span>
                 </div>
               ))}

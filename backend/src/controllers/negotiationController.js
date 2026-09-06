@@ -20,14 +20,16 @@ const populateNegotiationQuery = (query) => {
       populate: [
         { path: 'salesRep', select: 'name email role' },
         { path: 'assignedSalesManager', select: 'name email role' },
-        { path: 'items.product', select: 'name unitPrice sku category' }
+        { path: 'customer', select: 'name company tier email phone' },
+        { path: 'items.product', select: 'name unitPrice sku category type description marginPercentage' }
       ]
     })
     .populate({
       path: 'customerRequest',
       populate: [
         { path: 'assignedSalesRep', select: 'name email role' },
-        { path: 'items.product', select: 'name unitPrice sku category' }
+        { path: 'customer', select: 'name company tier email phone' },
+        { path: 'items.product', select: 'name unitPrice sku category type description marginPercentage' }
       ]
     })
     .populate('customer', 'name company tier email phone')
@@ -37,6 +39,14 @@ const populateNegotiationQuery = (query) => {
     .populate('history.updatedBy', 'name role email');
 };
 
+const getIdStr = (val) => {
+  if (!val) return null;
+  if (typeof val === 'string') return val;
+  if (val._id) return val._id.toString();
+  if (typeof val.toString === 'function') return val.toString();
+  return null;
+};
+
 // Helper to check user access rights to a negotiation
 const checkNegotiationAccess = async (reqUser, negotiation, customerRequestObj, quotationObj) => {
   if (!reqUser) return false;
@@ -44,11 +54,13 @@ const checkNegotiationAccess = async (reqUser, negotiation, customerRequestObj, 
 
   if (role === 'ADMIN' || role === 'FINANCE_OPERATIONS') return true;
 
+  const userId = getIdStr(reqUser._id || reqUser);
+
   // Derive Customer ID for logged-in user
   let userCustId = null;
   if (role === 'CUSTOMER') {
-    userCustId = reqUser.customerId?._id ? reqUser.customerId._id.toString() : reqUser.customerId?.toString();
-    if (!userCustId) {
+    userCustId = getIdStr(reqUser.customerId);
+    if (!userCustId && reqUser.email) {
       const custDoc = await Customer.findOne({ email: reqUser.email });
       if (custDoc) userCustId = custDoc._id.toString();
     }
@@ -57,39 +69,42 @@ const checkNegotiationAccess = async (reqUser, negotiation, customerRequestObj, 
   // Customer authorization
   if (role === 'CUSTOMER') {
     if (!userCustId) return false;
-    const negCust = negotiation?.customer?._id ? negotiation.customer._id.toString() : negotiation?.customer?.toString();
-    const quoteCust = quotationObj?.customer?._id ? quotationObj.customer._id.toString() : quotationObj?.customer?.toString();
-    const reqCust = customerRequestObj?.customer?._id ? customerRequestObj.customer._id.toString() : customerRequestObj?.customer?.toString();
+    const negCust = getIdStr(negotiation?.customer);
+    const quoteCust = getIdStr(quotationObj?.customer);
+    const reqCust = getIdStr(customerRequestObj?.customer);
 
     return (negCust === userCustId || quoteCust === userCustId || reqCust === userCustId);
   }
 
   // Sales Rep authorization
   if (role === 'SALES_REP') {
-    const userId = reqUser._id.toString();
-    const negRep = negotiation?.salesRep?._id ? negotiation.salesRep._id.toString() : negotiation?.salesRep?.toString();
-    const quoteRep = quotationObj?.salesRep?._id ? quotationObj.salesRep._id.toString() : quotationObj?.salesRep?.toString();
-    const reqRep = customerRequestObj?.assignedSalesRep?._id ? customerRequestObj.assignedSalesRep._id.toString() : customerRequestObj?.assignedSalesRep?.toString();
+    const negRep = getIdStr(negotiation?.salesRep);
+    const quoteRep = getIdStr(quotationObj?.salesRep);
+    const reqRep = getIdStr(customerRequestObj?.assignedSalesRep);
 
     return (negRep === userId || quoteRep === userId || reqRep === userId);
   }
 
   // Sales Manager authorization
   if (role === 'SALES_MANAGER') {
-    const userId = reqUser._id.toString();
-    const negMgr = negotiation?.salesManager?._id ? negotiation.salesManager._id.toString() : negotiation?.salesManager?.toString();
-    const quoteMgr = quotationObj?.assignedSalesManager?._id ? quotationObj.assignedSalesManager._id.toString() : quotationObj?.assignedSalesManager?.toString();
+    const negMgr = getIdStr(negotiation?.salesManager);
+    const quoteMgr = getIdStr(quotationObj?.assignedSalesManager);
 
     if (negMgr === userId || quoteMgr === userId) return true;
 
-    // Check if sales rep belongs to this manager's team
+    // Check if sales rep on deal belongs to this manager's team
     const teamReps = await User.find({ salesManagerId: reqUser._id }).select('_id');
     const teamRepIds = teamReps.map(r => r._id.toString());
 
-    const negRep = negotiation?.salesRep?._id ? negotiation.salesRep._id.toString() : negotiation?.salesRep?.toString();
-    const quoteRep = quotationObj?.salesRep?._id ? quotationObj.salesRep._id.toString() : quotationObj?.salesRep?.toString();
+    const negRep = getIdStr(negotiation?.salesRep);
+    const quoteRep = getIdStr(quotationObj?.salesRep);
+    const reqRep = getIdStr(customerRequestObj?.assignedSalesRep);
 
-    return teamRepIds.includes(negRep) || teamRepIds.includes(quoteRep);
+    return (
+      (negRep && teamRepIds.includes(negRep)) ||
+      (quoteRep && teamRepIds.includes(quoteRep)) ||
+      (reqRep && teamRepIds.includes(reqRep))
+    );
   }
 
   return false;
@@ -237,6 +252,18 @@ const addNegotiationMessage = async (req, res) => {
     const isAuth = await checkNegotiationAccess(req.user, negotiation, null, quotation);
     if (!isAuth) {
       return res.status(403).json({ message: 'Not authorized to negotiate on this deal' });
+    }
+
+    if (req.user.role === 'SALES_MANAGER') {
+      return res.status(403).json({ 
+        message: 'Sales Managers cannot participate in the active customer-rep negotiation thread. Sales Managers provide internal advice, guidance notes, and discount limits.' 
+      });
+    }
+
+    if (req.user.role !== 'CUSTOMER' && req.user.role !== 'SALES_REP' && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ 
+        message: 'Only Customers and Sales Representatives can actively participate in the negotiation thread.' 
+      });
     }
 
     // Check deal status
@@ -821,11 +848,19 @@ const getSalesRepNegotiations = async (req, res) => {
     const teamReps = await User.find({ salesManagerId: req.user._id }).select('_id');
     const repIds = [req.user._id, ...teamReps.map(r => r._id)];
 
+    const custReqs = await CustomerRequest.find({ assignedSalesRep: { $in: repIds } }).select('_id');
+    const reqIds = custReqs.map(r => r._id);
+
+    const quotes = await Quotation.find({ salesRep: { $in: repIds } }).select('_id');
+    const quoteIds = quotes.map(q => q._id);
+
     const negotiations = await populateNegotiationQuery(
       Negotiation.find({
         $or: [
           { salesRep: { $in: repIds } },
-          { salesManager: req.user._id }
+          { salesManager: req.user._id },
+          { quotation: { $in: quoteIds } },
+          { customerRequest: { $in: reqIds } }
         ],
         status: { $ne: 'DISCARDED' }
       }).sort('-updatedAt')
@@ -871,9 +906,24 @@ const addNegotiationMessageById = async (req, res) => {
       return res.status(404).json({ message: 'Negotiation thread not found' });
     }
 
-    const isAuth = await checkNegotiationAccess(req.user, negotiation, null, null);
+    const quotationObj = negotiation.quotation ? await Quotation.findById(negotiation.quotation) : null;
+    const customerRequestObj = negotiation.customerRequest ? await CustomerRequest.findById(negotiation.customerRequest) : null;
+
+    const isAuth = await checkNegotiationAccess(req.user, negotiation, customerRequestObj, quotationObj);
     if (!isAuth) {
       return res.status(403).json({ message: 'Not authorized to send messages in this negotiation' });
+    }
+
+    if (req.user.role === 'SALES_MANAGER') {
+      return res.status(403).json({ 
+        message: 'Sales Managers cannot participate in the active customer-rep negotiation thread. Sales Managers provide internal advice, guidance notes, and discount limits.' 
+      });
+    }
+
+    if (req.user.role !== 'CUSTOMER' && req.user.role !== 'SALES_REP' && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ 
+        message: 'Only Customers and Sales Representatives can actively participate in the negotiation thread.' 
+      });
     }
 
     if (negotiation.status === 'Closed' || negotiation.status === 'CLOSED') {
@@ -1053,6 +1103,59 @@ const withdrawNegotiation = async (req, res) => {
   }
 };
 
+// @desc Sales Manager sets internal guidance advice & maximum discount ceiling
+// @route POST /api/negotiations/:id/manager-advice
+const addManagerAdvice = async (req, res) => {
+  try {
+    const { managerMaxAllowedDiscount, managerAdviceNote } = req.body;
+
+    let negotiation = await Negotiation.findById(req.params.id);
+    if (!negotiation && mongoose.Types.ObjectId.isValid(req.params.id)) {
+      negotiation = await Negotiation.findOne({ quotation: req.params.id });
+    }
+
+    if (!negotiation) {
+      return res.status(404).json({ message: 'Negotiation thread not found' });
+    }
+
+    if (req.user.role !== 'SALES_MANAGER' && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Only Sales Managers can provide manager advice and discount limits' });
+    }
+
+    if (!negotiation.salesManager) {
+      negotiation.salesManager = req.user._id;
+    }
+
+    if (managerMaxAllowedDiscount !== undefined && managerMaxAllowedDiscount !== null && managerMaxAllowedDiscount !== '') {
+      negotiation.managerMaxAllowedDiscount = Number(managerMaxAllowedDiscount);
+    }
+
+    if (managerAdviceNote !== undefined && managerAdviceNote !== null) {
+      negotiation.managerAdviceNote = managerAdviceNote;
+    }
+
+    negotiation.history.push({
+      action: 'MANAGER_ADVICE',
+      requestedDiscount: Number(managerMaxAllowedDiscount || negotiation.managerMaxAllowedDiscount || 0),
+      message: `[Manager Advice] Authorized Max Discount Limit: ${managerMaxAllowedDiscount || 'Default'}%. Note: ${managerAdviceNote || 'No guidance note provided.'}`,
+      updatedBy: req.user._id,
+      updatedByRole: req.user.role,
+      timestamp: new Date()
+    });
+
+    if (negotiation.customerRequest && managerAdviceNote) {
+      await CustomerRequest.findByIdAndUpdate(negotiation.customerRequest, { managerComment: managerAdviceNote });
+    }
+
+    await negotiation.save();
+
+    const populatedNeg = await populateNegotiationQuery(Negotiation.findById(negotiation._id));
+    res.json({ message: 'Manager advice and discount limit saved successfully', negotiation: populatedNeg });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getNegotiationByQuotation,
   getNegotiationByCustomerRequest,
@@ -1064,7 +1167,8 @@ module.exports = {
   reopenNegotiation,
   acceptNegotiation,
   escalateNegotiationToManager,
-  withdrawNegotiation
+  withdrawNegotiation,
+  addManagerAdvice
 };
 
 

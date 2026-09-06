@@ -10,7 +10,7 @@ const messageSchema = new mongoose.Schema({
 });
 
 const negotiationHistorySchema = new mongoose.Schema({
-  action: { type: String, enum: ['PROPOSED', 'REJECTED', 'REOPENED', 'COUNTER_OFFER', 'APPROVED', 'MANAGER_REQUESTED_CHANGES'], required: true },
+  action: { type: String, enum: ['PROPOSED', 'REJECTED', 'REOPENED', 'COUNTER_OFFER', 'APPROVED', 'MANAGER_REQUESTED_CHANGES', 'MANAGER_ADVICE'], required: true },
   previousDiscount: { type: Number, default: 0 },
   requestedDiscount: { type: Number, default: 0 },
   message: { type: String, default: '' },
@@ -35,6 +35,7 @@ const negotiationSchema = new mongoose.Schema({
   previousDiscount: { type: Number, default: 0 },
   currentRequestedDiscount: { type: Number, default: 0 },
   managerMaxAllowedDiscount: { type: Number, default: null },
+  managerAdviceNote: { type: String, default: '' },
   rejectionReason: { type: String, default: '' },
   customerConfirmation: {
     status: { type: String, enum: ['PENDING', 'CONFIRMED', 'REJECTED'], default: 'PENDING' },

@@ -4,7 +4,7 @@ const auditSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   action: { 
     type: String, 
-    enum: ['SUBMITTED', 'APPROVED_BY_MANAGER', 'APPROVED_BY_FINANCE', 'REJECTED', 'RETURNED_FOR_CHANGES', 'CUSTOMER_COUNTER', 'ESCALATED', 'REOPENED'], 
+    enum: ['SUBMITTED', 'APPROVED_BY_MANAGER', 'APPROVED_BY_FINANCE', 'REJECTED', 'REJECTED_BY_FINANCE', 'RETURNED_FOR_CHANGES', 'FINANCE_OPINION_ADDED', 'SUGGEST_CHANGES', 'CUSTOMER_COUNTER', 'ESCALATED', 'REOPENED'], 
     required: true 
   },
   timestamp: { type: Date, default: Date.now },
@@ -23,7 +23,7 @@ const approvalSchema = new mongoose.Schema({
   allowedDiscount: { type: Number, default: 0 },
   currentStep: { 
     type: String, 
-    enum: ['SALES_MANAGER', 'FINANCE_OPERATIONS', 'COMPLETED', 'REJECTED', 'NEGOTIATION_REQUIRED'], 
+    enum: ['SALES_MANAGER', 'FINANCE_OPERATIONS', 'FINANCE_REVIEWED', 'COMPLETED', 'REJECTED', 'NEGOTIATION_REQUIRED'], 
     required: true 
   },
   riskScore: { type: Number, required: true },
@@ -36,7 +36,7 @@ const approvalSchema = new mongoose.Schema({
     actionDate: { type: Date }
   },
   financeApproval: {
-    status: { type: String, enum: ['NOT_REQUIRED', 'PENDING', 'APPROVED', 'REJECTED'], default: 'NOT_REQUIRED' },
+    status: { type: String, enum: ['NOT_REQUIRED', 'PENDING', 'APPROVED', 'REJECTED', 'REQUEST_CHANGES', 'SUGGEST_CHANGES'], default: 'NOT_REQUIRED' },
     approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     comment: { type: String, default: '' },
     actionDate: { type: Date }

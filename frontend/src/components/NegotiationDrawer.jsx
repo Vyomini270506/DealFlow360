@@ -4,6 +4,10 @@ import { toast } from 'sonner';
 import { X, Send, MessageSquare, AlertTriangle, ShieldCheck, CheckCircle2, Clock } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import DealPipeline from './DealPipeline';
+import AICounterOfferCard from './AICounterOfferCard';
+import ProfitProtectionWidget from './ProfitProtectionWidget';
+import ApprovalSimulatorWidget from './ApprovalSimulatorWidget';
+import NegotiationHeatBadge from './NegotiationHeatBadge';
 
 const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequestId, onClose, onSuccess }) => {
   const { user } = useAuth();
@@ -11,8 +15,11 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
   const [selectedItemIndex, setSelectedItemIndex] = useState(0);
   const [message, setMessage] = useState('');
   const [counterDiscount, setCounterDiscount] = useState('');
+  const [managerMaxDisc, setManagerMaxDisc] = useState('');
+  const [managerAdvice, setManagerAdvice] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [savingAdvice, setSavingAdvice] = useState(false);
   const [showFinalModal, setShowFinalModal] = useState(false);
 
   const targetId = negotiationId || quotationId || customerRequestId;
@@ -28,38 +35,52 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
     let loadedData = null;
 
     try {
-      // 1. Try fetching directly as a Negotiation ID
-      if (negotiationId || (targetId && targetId.length === 24)) {
+      // 1. If explicit quotationId is passed, try quotation endpoint first
+      if (quotationId) {
         try {
-          const { data } = await API.get(`/negotiations/${targetId}`);
+          const { data } = await API.get(`/negotiations/quotation/${quotationId}`);
           if (data && data._id) loadedData = data;
-        } catch (e) {
-          // Continue fallback
-        }
+        } catch (e) { }
       }
 
-      // 2. Try fetching by Quotation ID
-      if (!loadedData && (quotationId || targetId)) {
+      // 2. If explicit customerRequestId is passed, try customer-request endpoint
+      if (!loadedData && customerRequestId) {
         try {
-          const { data } = await API.get(`/negotiations/quotation/${quotationId || targetId}`);
+          const { data } = await API.get(`/negotiations/customer-request/${customerRequestId}`);
           if (data && data._id) loadedData = data;
-        } catch (e) {
-          // Continue fallback
-        }
+        } catch (e) { }
       }
 
-      // 3. Try fetching by CustomerRequest ID
-      if (!loadedData && (customerRequestId || targetId)) {
+      // 3. If explicit negotiationId is passed
+      if (!loadedData && negotiationId) {
         try {
-          const { data } = await API.get(`/negotiations/customer-request/${customerRequestId || targetId}`);
+          const { data } = await API.get(`/negotiations/${negotiationId}`);
+          if (data && data._id) loadedData = data;
+        } catch (e) { }
+      }
+
+      // 4. Fallback: try quotation endpoint with targetId, then direct negotiation ID endpoint
+      if (!loadedData && targetId) {
+        try {
+          const { data } = await API.get(`/negotiations/quotation/${targetId}`);
           if (data && data._id) loadedData = data;
         } catch (e) {
-          // Continue fallback
+          try {
+            const { data } = await API.get(`/negotiations/${targetId}`);
+            if (data && data._id) loadedData = data;
+          } catch (e2) {
+            try {
+              const { data } = await API.get(`/negotiations/customer-request/${targetId}`);
+              if (data && data._id) loadedData = data;
+            } catch (e3) { }
+          }
         }
       }
 
       if (loadedData) {
         setNegotiation(loadedData);
+        setManagerMaxDisc(loadedData.managerMaxAllowedDiscount !== null && loadedData.managerMaxAllowedDiscount !== undefined ? loadedData.managerMaxAllowedDiscount : '');
+        setManagerAdvice(loadedData.managerAdviceNote || loadedData.customerRequest?.managerComment || '');
       } else {
         toast.error('Could not load negotiation record');
       }
@@ -67,6 +88,26 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
       toast.error('Failed to load negotiation thread');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveManagerAdvice = async (e) => {
+    e.preventDefault();
+    if (!negotiation?._id) return;
+    setSavingAdvice(true);
+    try {
+      const { data } = await API.post(`/negotiations/${negotiation._id}/manager-advice`, {
+        managerMaxAllowedDiscount: managerMaxDisc !== '' ? Number(managerMaxDisc) : null,
+        managerAdviceNote: managerAdvice
+      });
+      toast.success('Manager advice and authorized ceiling saved!');
+      if (data.negotiation) setNegotiation(data.negotiation);
+      else fetchNegotiation();
+      if (onSuccess) onSuccess();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to save manager advice');
+    } finally {
+      setSavingAdvice(false);
     }
   };
 
@@ -206,6 +247,7 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
               }`}>
                 ● {isDealClosed ? 'FINALIZED' : 'ACTIVE'}
               </span>
+              <NegotiationHeatBadge quotationId={quotation?._id || quotationId} />
             </div>
             <p className="text-xs text-[#A7B0C0] mt-1">
               Customer: <span className="text-[#F5F7FA] font-semibold">{customerName}</span> | Rep: <span className="text-[#818CF8] font-semibold">{repName}</span>
@@ -391,17 +433,19 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
             </div>
           )}
 
-          {/* Sales Manager Instruction Banner */}
-          {customerRequest?.managerComment && (
+          {/* Sales Manager Instruction & Strategy Advice Banner */}
+          {(negotiation?.managerAdviceNote || customerRequest?.managerComment) && (
             <div className="p-3.5 rounded-xl bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#F59E0B] text-xs font-semibold flex items-start gap-2.5">
-              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-[#F59E0B]" />
               <div>
-                <span className="font-bold text-[#F59E0B] uppercase tracking-wider text-[10px]">Sales Manager Instruction:</span>
-                <p className="mt-0.5 font-medium text-[#F5F7FA] leading-relaxed">{customerRequest.managerComment}</p>
+                <span className="font-bold text-[#F59E0B] uppercase tracking-wider text-[10px]">Sales Manager Strategy Advice:</span>
+                <p className="mt-0.5 font-medium text-[#F5F7FA] leading-relaxed">
+                  {negotiation?.managerAdviceNote || customerRequest?.managerComment}
+                </p>
               </div>
             </div>
           )}
-          
+
           {/* Line Item Selector */}
           {items && items.length > 0 && (
             <div>
@@ -484,8 +528,49 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
 
         </div>
 
-        {/* OFFER COMPOSER FOOTER */}
-        {isDealClosed ? (
+        {/* OFFER COMPOSER FOOTER - ROLE SCOPED */}
+        {user?.role === 'SALES_MANAGER' ? (
+          <form onSubmit={handleSaveManagerAdvice} className="p-4 border-t border-[#242C3A] bg-[#0D111A] space-y-3">
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>Sales Managers provide internal guidance & set authorized discount ceilings. Thread chat is handled directly by Customer and Sales Representative.</span>
+            </div>
+
+            <div className="space-y-2">
+              <div>
+                <label className="block text-xs font-bold text-[#F59E0B] mb-1">Set Max Authorized Discount Ceiling (%)</label>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={managerMaxDisc}
+                  onChange={(e) => setManagerMaxDisc(e.target.value)}
+                  placeholder="e.g. 15"
+                  className="w-full bg-[#111722] border border-[#F59E0B]/40 rounded-xl px-3.5 py-2 text-xs text-[#F5F7FA] font-bold focus:border-[#F59E0B] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#A7B0C0] mb-1">Manager Strategy & Guidance Note for Sales Rep</label>
+                <textarea
+                  rows="2"
+                  value={managerAdvice}
+                  onChange={(e) => setManagerAdvice(e.target.value)}
+                  placeholder="e.g. Authorized discount up to 12%. Instruct rep to highlight 1-year warranty perk."
+                  className="w-full bg-[#111722] border border-[#242C3A] rounded-xl px-3.5 py-2 text-xs text-[#F5F7FA] focus:border-[#6366F1] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={savingAdvice}
+              className="w-full py-2.5 bg-[#F59E0B] hover:bg-[#F59E0B]/90 text-black font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition"
+            >
+              <ShieldCheck className="w-4 h-4" /> Save Manager Advice & Discount Limits
+            </button>
+          </form>
+        ) : isDealClosed ? (
           <div className="p-4 border-t border-[#242C3A] bg-[#0D111A] text-center">
             <p className="text-xs font-bold text-[#22C55E] flex items-center justify-center gap-1.5">
               <CheckCircle2 className="w-4 h-4" /> This negotiation is CLOSED.
@@ -493,6 +578,19 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
           </div>
         ) : (
           <form onSubmit={handleSendMessage} className="p-4 border-t border-[#242C3A] bg-[#0D111A] space-y-3">
+            <AICounterOfferCard
+              quotationId={quotation?._id || quotationId}
+              requestedDiscountPercent={counterDiscount || 15}
+              onApplyCounter={(disc, perkMsg) => {
+                setCounterDiscount(disc);
+                setMessage(`Proposing counter-offer: ${disc}% discount. Bundled Value Perk: ${perkMsg}`);
+              }}
+            />
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <ProfitProtectionWidget items={items} customerId={negotiation?.customer} />
+              <ApprovalSimulatorWidget items={items} customerId={negotiation?.customer} />
+            </div>
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-semibold text-[#A7B0C0]">

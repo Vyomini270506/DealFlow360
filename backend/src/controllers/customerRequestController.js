@@ -36,7 +36,7 @@ const createCustomerRequest = async (req, res) => {
       createdAt: { $gte: new Date(Date.now() - 60 * 1000) }
     }).populate('customer', 'name company tier email')
       .populate('assignedSalesRep', 'name email role phone')
-      .populate('items.product', 'name category unitPrice sku');
+      .populate('items.product');
 
     if (existingRecentRequest) {
       return res.status(200).json(existingRecentRequest);
@@ -140,7 +140,7 @@ const createCustomerRequest = async (req, res) => {
     const populated = await CustomerRequest.findById(customerRequest._id)
       .populate('customer', 'name company tier email')
       .populate('assignedSalesRep', 'name email role phone')
-      .populate('items.product', 'name category unitPrice sku');
+      .populate('items.product');
 
     res.status(201).json(populated);
   } catch (error) {
@@ -174,7 +174,7 @@ const getCustomerRequests = async (req, res) => {
     const requests = await CustomerRequest.find(filter)
       .populate('customer', 'name company tier email')
       .populate('assignedSalesRep', 'name email role phone')
-      .populate('items.product', 'name category unitPrice sku')
+      .populate('items.product')
       .sort('-createdAt');
 
     const { calculateBlendedDiscountRisk } = require('../services/riskEngine');
@@ -208,7 +208,7 @@ const getCustomerRequestById = async (req, res) => {
     const request = await CustomerRequest.findById(req.params.id)
       .populate('customer', 'name company tier email')
       .populate('assignedSalesRep', 'name email role phone')
-      .populate('items.product', 'name category unitPrice sku');
+      .populate('items.product');
 
     if (!request) {
       return res.status(404).json({ message: 'Customer request not found' });
@@ -690,10 +690,14 @@ const startNegotiationFromRequest = async (req, res) => {
       });
     }
 
-    // RULE: A negotiation can ONLY exist if a quotation/offer exists!
-    const quotation = await Quotation.findOne({ customerRequest: request._id, status: { $ne: 'DISCARDED' } });
+    // Auto-create quotation if missing when starting negotiation
+    let quotation = await Quotation.findOne({ customerRequest: request._id, status: { $ne: 'DISCARDED' } });
     if (!quotation) {
-      return res.status(400).json({ message: 'No quotation/offer exists for this request yet. Please generate a quotation before starting a negotiation.' });
+      quotation = await generateQuotationFromApprovedRequest({
+        customerRequest: request,
+        approvedByUserId: req.user._id,
+        userRole: req.user.role
+      });
     }
 
     // Determine sales manager ID

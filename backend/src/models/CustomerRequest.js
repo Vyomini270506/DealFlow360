@@ -54,7 +54,7 @@ const customerRequestSchema = new mongoose.Schema({
   escalationReason: { type: String, default: '' },
   managerComment: { type: String, default: '' },
   financeUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
-  financeDecision: { type: String, enum: ['SUPPORT', 'DO_NOT_SUPPORT', 'REQUEST_CHANGES', 'NONE'], default: 'NONE' },
+  financeDecision: { type: String, enum: ['SUPPORT', 'DO_NOT_SUPPORT', 'REQUEST_CHANGES', 'SUGGEST_CHANGES', 'COMMENT', 'NONE'], default: 'NONE' },
   financeComment: { type: String, default: '' },
   financeDecisionAt: { type: Date, default: null },
   activeNegotiation: { type: mongoose.Schema.Types.ObjectId, ref: 'Negotiation', default: null },

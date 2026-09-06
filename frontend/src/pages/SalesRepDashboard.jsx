@@ -28,6 +28,12 @@ import {
   Repeat
 } from 'lucide-react';
 import { toast } from 'sonner';
+import DealRescueCenter from '../components/DealRescueCenter';
+import DealRiskRadar from '../components/DealRiskRadar';
+import DealHealthBadge from '../components/DealHealthBadge';
+import CustomerNegotiationMemoryCard from '../components/CustomerNegotiationMemoryCard';
+import SmartWarehousePromiseCard from '../components/SmartWarehousePromiseCard';
+import ActivityTimeline from '../components/ActivityTimeline';
 
 const SalesRepDashboard = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -309,6 +315,27 @@ const SalesRepDashboard = () => {
       {/* TAB 1: DASHBOARD (OVERVIEW) */}
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
+          {/* DEAL RESCUE CENTER */}
+          <DealRescueCenter onSelectDeal={async (recId, recType, actionLabel, itemId, approvalId) => {
+            try {
+              if (actionLabel === 'Open Negotiation') {
+                setActiveNegotiationId(recId || itemId);
+                return;
+              }
+
+              if (recType === 'CustomerRequest') {
+                const { data } = await API.get(`/customer-requests/${recId}`);
+                if (data) setSelectedRequestModal(data);
+              } else {
+                const { data } = await API.get(`/quotations/${recId}`);
+                if (data && data.quotation) setSelectedQuotationView(data.quotation);
+                else if (data) setSelectedQuotationView(data);
+              }
+            } catch (err) {
+              toast.error('Failed to open deal details');
+            }
+          }} />
+
           {/* KPI Cards Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <KPICard title="Assigned Product Requests" value={activeCustomerRequests.length} subtitle="Assigned via workload" icon={ShoppingCart} color="indigo" />
@@ -812,7 +839,7 @@ const SalesRepDashboard = () => {
                         </span>
                       ) : isLowRisk ? (
                         <button
-                          onClick={() => handleOpenNegotiationDrawer(q._id)}
+                          onClick={() => setActiveNegotiationId(q._id)}
                           className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
                         >
                           <CheckCircle className="w-3.5 h-3.5" /> Accept Counter-Offer
@@ -1229,6 +1256,11 @@ const SalesRepDashboard = () => {
             </div>
 
             <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <DealHealthBadge quotationId={selectedQuotationView._id} />
+                <DealRiskRadar quotationId={selectedQuotationView._id} />
+              </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-muted text-muted-foreground font-semibold border-b border-border">
@@ -1258,6 +1290,14 @@ const SalesRepDashboard = () => {
                 <p className="text-muted-foreground">Subtotal: <span className="text-foreground">₹{selectedQuotationView.subtotal?.toLocaleString()}</span></p>
                 <p className="text-muted-foreground">GST / Tax (18%): <span className="text-foreground">₹{selectedQuotationView.tax?.toLocaleString()}</span></p>
                 <p className="text-sm font-extrabold text-primary pt-1 border-t border-border">Grand Total: ₹{selectedQuotationView.grandTotal?.toLocaleString()}</p>
+              </div>
+
+              <SmartWarehousePromiseCard items={selectedQuotationView.items} />
+              
+              <CustomerNegotiationMemoryCard customerId={selectedQuotationView.customer?._id || selectedQuotationView.customer} />
+
+              <div className="pt-2 border-t border-border">
+                <ActivityTimeline recordType="Quotation" recordId={selectedQuotationView._id} />
               </div>
             </div>
 

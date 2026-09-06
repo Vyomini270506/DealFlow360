@@ -74,11 +74,11 @@ const ApprovalsPage = () => {
               <tbody className="divide-y divide-[#242C3A] bg-[#111722]">
                 {approvals.map((app) => (
                   <tr key={app._id} className="hover:bg-[#161D29] transition">
-                    <td className="p-3.5 font-bold text-[#818CF8]">{app.quotation?.quoteNumber}</td>
+                    <td className="p-3.5 font-bold text-[#818CF8]">{app.quotation?.quoteNumber || app.customerRequest?.requestNumber || `Approval #${app._id.slice(-4)}`}</td>
                     <td className="p-3.5 font-semibold text-[#F59E0B]">{app.currentStep}</td>
-                    <td className="p-3.5 text-[#A7B0C0]">{app.salesRep?.name}</td>
-                    <td className="p-3.5 font-semibold text-[#F5F7FA]">{app.quotation?.customer?.company || app.quotation?.customer?.name}</td>
-                    <td className="p-3.5 font-bold text-[#F5F7FA] font-mono-numeric">₹{app.quotation?.grandTotal?.toLocaleString()}</td>
+                    <td className="p-3.5 text-[#A7B0C0]">{app.salesRep?.name || 'Sales Rep'}</td>
+                    <td className="p-3.5 font-semibold text-[#F5F7FA]">{app.quotation?.customer?.company || app.quotation?.customer?.name || app.customer?.company || app.customer?.name || 'Customer'}</td>
+                    <td className="p-3.5 font-bold text-[#F5F7FA] font-mono-numeric">₹{app.quotation?.grandTotal ? app.quotation.grandTotal.toLocaleString() : '—'}</td>
                     <td className="p-3.5">
                       <RiskBadge level={app.riskLevel} score={app.riskScore} />
                     </td>

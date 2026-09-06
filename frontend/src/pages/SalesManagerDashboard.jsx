@@ -17,10 +17,14 @@ import {
   Search,
   Eye,
   FileText,
-  Trash2
+  Trash2,
+  MessageSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../context/AuthContext';
+import DealRescueCenter from '../components/DealRescueCenter';
+import ApprovalModal from '../components/ApprovalModal';
+import NegotiationDrawer from '../components/NegotiationDrawer';
 
 const RepWorkloadMonitor = ({ teamReps, requests }) => {
   const activeStatuses = ['Pending', 'Submitted', 'Processing', 'In Review', 'Escalated_Manager', 'Approved_Manager', 'Quoted'];
@@ -79,6 +83,8 @@ const SalesManagerDashboard = () => {
   const [customerRequests, setCustomerRequests] = useState([]);
   const [teamReps, setTeamReps] = useState([]);
   const [selectedRequestView, setSelectedRequestView] = useState(null);
+  const [selectedApproval, setSelectedApproval] = useState(null);
+  const [activeNegotiationId, setActiveNegotiationId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('ALL'); // ALL, PENDING, MEDIUM, HIGH, APPROVED, REJECTED, CHANGES
   const [searchTerm, setSearchTerm] = useState('');
@@ -250,6 +256,51 @@ const SalesManagerDashboard = () => {
           <RefreshCw className={`w-3.5 h-3.5 text-primary ${loading ? 'animate-spin' : ''}`} /> Refresh Data
         </button>
       </div>
+
+      {/* DEAL RESCUE CENTER */}
+      <DealRescueCenter onSelectDeal={async (recId, recType, actionLabel, itemId, approvalId) => {
+        try {
+          if (actionLabel === 'Open Negotiation') {
+            setActiveNegotiationId(recId || itemId);
+            return;
+          }
+
+          if (actionLabel === 'Review Approval' || recType === 'Approval') {
+            const getId = (v) => v?._id ? v._id.toString() : (v ? v.toString() : '');
+            let app = approvals.find(a => 
+              getId(a._id) === getId(approvalId) || 
+              getId(a._id) === getId(itemId) || 
+              getId(a.quotation?._id || a.quotation) === getId(recId) || 
+              getId(a.customerRequest?._id || a.customerRequest) === getId(recId)
+            );
+            if (!app && (approvalId || itemId)) {
+              try {
+                const { data } = await API.get('/approvals');
+                app = (data || []).find(a => 
+                  getId(a._id) === getId(approvalId) || 
+                  getId(a._id) === getId(itemId) || 
+                  getId(a.quotation?._id || a.quotation) === getId(recId)
+                );
+              } catch (e) {}
+            }
+            if (app) {
+              setSelectedApproval(app);
+              return;
+            }
+          }
+
+          if (recType === 'CustomerRequest') {
+            const { data } = await API.get(`/customer-requests/${recId}`);
+            if (data) setSelectedRequestView(data);
+          } else {
+            const { data } = await API.get(`/quotations/${recId}`);
+            if (data && data.quotation) setSelectedRequestView(data.customerRequest || data.quotation);
+            else if (data) setSelectedRequestView(data);
+          }
+        } catch (err) {
+          toast.error('Failed to open deal details');
+        }
+      }} />
 
       {/* KPI METRICS GRID (Interactive Cards for Filtering) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -544,6 +595,18 @@ const SalesManagerDashboard = () => {
                     </td>
                     <td className="p-3 text-right space-x-1.5">
                       <button
+                        onClick={() => setSelectedApproval(app)}
+                        className="px-2.5 py-1.5 rounded-lg bg-muted border border-border text-foreground hover:bg-card font-bold text-xs inline-flex items-center gap-1 transition"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-primary" /> View Details
+                      </button>
+                      <button
+                        onClick={() => setActiveNegotiationId(app.quotation?._id || app.quotation || app.customerRequest?._id || app._id)}
+                        className="px-2.5 py-1.5 rounded-lg bg-card border border-border text-foreground hover:bg-muted font-bold text-xs inline-flex items-center gap-1 transition shadow-sm"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-amber-500" /> Negotiation Thread
+                      </button>
+                      <button
                         onClick={() => handleProcessQuotationApproval(app._id, 'APPROVE')}
                         className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
                       >
@@ -690,6 +753,22 @@ const SalesManagerDashboard = () => {
           </div>
         </div>
       )}
+      {/* APPROVAL REVIEW MODAL */}
+      <ApprovalModal
+        isOpen={!!selectedApproval}
+        approval={selectedApproval}
+        onClose={() => setSelectedApproval(null)}
+        onSuccess={fetchData}
+      />
+
+      {/* NEGOTIATION DRAWER FOR MANAGER */}
+      <NegotiationDrawer
+        isOpen={!!activeNegotiationId}
+        negotiationId={activeNegotiationId}
+        quotationId={activeNegotiationId}
+        onClose={() => setActiveNegotiationId(null)}
+        onSuccess={fetchData}
+      />
 
     </div>
   );

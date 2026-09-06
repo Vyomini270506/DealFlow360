@@ -31,6 +31,8 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
       toast.success(`Approval decision '${actionType}' processed successfully`);
       onSuccess();
       onClose();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Approval action failed');
     } finally {
       setSubmitting(false);
     }
@@ -46,12 +48,12 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
           comment: reason || `Finance opinion: ${decision}`
         });
       } else {
-        await API.post(`/approvals/${approval._id}/action`, {
-          action: decision === 'SUPPORT' ? 'APPROVE' : 'RETURN_FOR_CHANGES',
-          reason: `Finance opinion: ${decision}. ${reason}`
+        await API.post(`/approvals/${approval._id}/finance-opinion`, {
+          decision,
+          comment: reason || `Finance advisory review: ${decision}`
         });
       }
-      toast.success(`Finance opinion '${decision}' recorded! Submitted to Sales Manager for final decision.`);
+      toast.success(`Finance advisory opinion '${decision}' recorded! Submitted to Sales Manager for final decision.`);
       onSuccess();
       onClose();
     } catch (err) {
@@ -177,7 +179,7 @@ const ApprovalModal = ({ isOpen, approval, onClose, onSuccess }) => {
                     <tbody className="divide-y divide-border">
                       {quote?.items?.map((item, idx) => (
                         <tr key={idx}>
-                          <td className="p-2 font-semibold text-foreground">{item.product?.name}</td>
+                          <td className="p-2 font-semibold text-foreground">{item.product?.name || item.productName || item.product?.sku || 'Product'}</td>
                           <td className="p-2">{item.quantity}</td>
                           <td className="p-2">₹{item.unitPrice?.toLocaleString()}</td>
                           <td className="p-2 font-bold text-emerald-500">{item.discountPercent}%</td>

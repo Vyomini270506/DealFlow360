@@ -35,7 +35,7 @@ const getQuotations = async (req, res) => {
     let query = Quotation.find(filter)
       .populate('customer', 'name company tier email')
       .populate('salesRep', 'name email')
-      .populate('items.product', 'name category unitPrice sku')
+      .populate('items.product')
       .sort(sort);
 
     let quotations = await query;
@@ -639,7 +639,7 @@ const getClosedDeals = async (req, res) => {
       .populate('customer', 'name company tier email phone')
       .populate('salesRep', 'name email role')
       .populate('assignedSalesManager', 'name email')
-      .populate('items.product', 'name category unitPrice sku')
+      .populate('items.product')
       .sort('-updatedAt');
 
     res.json(closedDeals);

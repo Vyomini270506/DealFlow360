@@ -154,20 +154,20 @@ const QuotationDetailPage = () => {
             <tbody className="divide-y divide-slate-800/60 bg-slate-900/40">
               {quotation.items?.map((item, idx) => (
                 <tr key={idx} className="hover:bg-slate-800/40 transition">
-                  <td className="p-3 font-bold text-white">{item.product?.name}</td>
-                  <td className="p-3 text-slate-400">{item.product?.category}</td>
-                  <td className="p-3">{item.quantity}</td>
-                  <td className="p-3">₹{item.unitPrice?.toLocaleString()}</td>
-                  <td className="p-3 text-slate-400 font-semibold">{item.allowedDiscountPercent}%</td>
+                  <td className="p-3 font-bold text-white">{item.product?.name || item.productName || item.product?.sku || 'Product'}</td>
+                  <td className="p-3 text-slate-400">{item.product?.category || 'Standard'}</td>
+                  <td className="p-3">{item.quantity || 1}</td>
+                  <td className="p-3">₹{(item.unitPrice || item.product?.unitPrice || 0).toLocaleString()}</td>
+                  <td className="p-3 text-slate-400 font-semibold">{item.allowedDiscountPercent ?? 0}%</td>
                   <td className="p-3">
                     <span className={`font-bold ${item.approvalRequired ? 'text-rose-400' : 'text-emerald-400'}`}>
-                      {item.discountPercent}%
+                      {item.discountPercent ?? 0}%
                     </span>
                     {item.approvalRequired && (
-                      <p className="text-[10px] text-rose-400 mt-0.5">{item.breachReason}</p>
+                      <p className="text-[10px] text-rose-400 mt-0.5">{item.breachReason || 'Requires Approval'}</p>
                     )}
                   </td>
-                  <td className="p-3 text-right font-extrabold text-indigo-300">₹{item.lineTotal?.toLocaleString()}</td>
+                  <td className="p-3 text-right font-extrabold text-indigo-300">₹{(item.lineTotal || 0).toLocaleString()}</td>
                 </tr>
               ))}
             </tbody>

@@ -97,181 +97,133 @@ const processApprovalAction = async (req, res) => {
     }
 
     // Security & Role Validation
-    if (approval.currentStep === 'SALES_MANAGER') {
-      if (req.user.role !== 'SALES_MANAGER' && req.user.role !== 'ADMIN') {
-        return res.status(403).json({ message: 'Only Sales Managers can perform this approval step' });
+    // Security & Role Validation: Finance Operator is NOT an approver
+    if (req.user.role === 'FINANCE_OPERATIONS') {
+      return res.status(403).json({
+        message: 'Finance Operators provide advisory financial reviews (SUPPORT / DO NOT SUPPORT / SUGGEST CHANGES / COMMENT). Only Sales Managers have final approval authority.'
+      });
+    }
+
+    if (req.user.role !== 'SALES_MANAGER' && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Only Sales Managers can perform approval or rejection decisions.' });
+    }
+
+    if (req.user.role === 'SALES_MANAGER') {
+      const isDirectManager = approval.salesManager && approval.salesManager.toString() === req.user._id.toString();
+      const repUser = await User.findById(approval.salesRep);
+      const isTeamManager = repUser && repUser.salesManagerId && repUser.salesManagerId.toString() === req.user._id.toString();
+      if (!isDirectManager && !isTeamManager && req.user.role !== 'ADMIN') {
+        return res.status(403).json({ message: 'You are not authorized to approve requests assigned to another Sales Manager' });
       }
+    }
 
-      if (req.user.role === 'SALES_MANAGER') {
-        const isDirectManager = approval.salesManager && approval.salesManager.toString() === req.user._id.toString();
-        const repUser = await User.findById(approval.salesRep);
-        const isTeamManager = repUser && repUser.salesManagerId && repUser.salesManagerId.toString() === req.user._id.toString();
-        if (!isDirectManager && !isTeamManager) {
-          return res.status(403).json({ message: 'You are not authorized to approve requests assigned to another Sales Manager' });
-        }
-      }
+    if (action === 'APPROVE') {
+      approval.managerApproval.status = 'APPROVED';
+      approval.managerApproval.approvedBy = req.user._id;
+      approval.managerApproval.comment = reason;
+      approval.managerApproval.actionDate = new Date();
 
-      if (action === 'APPROVE') {
-        approval.managerApproval.status = 'APPROVED';
-        approval.managerApproval.approvedBy = req.user._id;
-        approval.managerApproval.comment = reason;
-        approval.managerApproval.actionDate = new Date();
-
-        approval.auditTrail.push({
-          user: req.user._id,
-          action: 'APPROVED_BY_MANAGER',
-          role: req.user.role,
-          reason
-        });
-
-        approval.currentStep = 'COMPLETED';
-
-        if (customerRequest) {
-          customerRequest.status = 'Approved_Manager';
-          customerRequest.managerComment = reason || 'Approved by Sales Manager';
-          await customerRequest.save();
-
-          const { generateQuotationFromApprovedRequest } = require('../services/quotationGenerator');
-          await generateQuotationFromApprovedRequest({
-            customerRequest,
-            approvedByUserId: req.user._id,
-            userRole: req.user.role
-          });
-        }
-
-        const Negotiation = require('../models/Negotiation');
-        let negotiation = approval.negotiation ? await Negotiation.findById(approval.negotiation) : null;
-        if (!negotiation && quotation) {
-          negotiation = await Negotiation.findOne({ quotation: quotation._id });
-        }
-        if (!negotiation && customerRequest) {
-          negotiation = await Negotiation.findOne({ customerRequest: customerRequest._id });
-        }
-
-        const effectiveMaxDisc = req.body.maxAllowedDiscount !== undefined && req.body.maxAllowedDiscount !== null 
-          ? Number(req.body.maxAllowedDiscount) 
-          : (approval.allowedDiscount || null);
-
-        if (negotiation) {
-          if (effectiveMaxDisc !== null) {
-            negotiation.managerMaxAllowedDiscount = effectiveMaxDisc;
-          }
-          if (reason) {
-            negotiation.messages.push({
-              sender: req.user._id,
-              senderRole: req.user.role,
-              message: `[Sales Manager Guidance] Authorized max discount: ${effectiveMaxDisc !== null ? effectiveMaxDisc + '%' : 'Standard Tier Limit'}. Note: ${reason}`,
-              timestamp: new Date()
-            });
-          }
-          await negotiation.save();
-        }
-
-        if (quotation) {
-          quotation.approvalChainState = 'APPROVED';
-          // RULE: ACTIVE NEGOTIATION + APPROVED = INVALID STATE
-          // If negotiation is active, quotation status must remain 'Negotiation'
-          if (negotiation && (negotiation.status === 'Active' || negotiation.status === 'Open')) {
-            quotation.status = 'Negotiation';
-          } else {
-            quotation.status = 'Approved';
-          }
-          await quotation.save();
-        }
-      } else if (action === 'REJECT') {
-        approval.managerApproval.status = 'REJECTED';
-        approval.currentStep = 'REJECTED';
-
-        approval.auditTrail.push({
-          user: req.user._id,
-          action: 'REJECTED',
-          role: req.user.role,
-          reason
-        });
-
-        if (customerRequest) {
-          customerRequest.status = 'Rejected_Manager';
-          customerRequest.managerComment = reason || 'Rejected by Sales Manager';
-          await customerRequest.save();
-        }
-
-        if (quotation) {
-          quotation.approvalChainState = 'REJECTED';
-          quotation.status = 'Rejected';
-          await quotation.save();
-        }
-      } else if (action === 'RETURN_FOR_CHANGES' || action === 'REQUEST_CHANGES') {
-        approval.managerApproval.status = 'NEGOTIATION_REQUIRED';
-        approval.currentStep = 'NEGOTIATION_REQUIRED';
-
-        approval.auditTrail.push({
-          user: req.user._id,
-          action: 'RETURNED_FOR_CHANGES',
-          role: req.user.role,
-          reason
-        });
-
-        if (customerRequest) {
-          customerRequest.status = 'Negotiation_Required';
-          customerRequest.managerComment = reason || 'Sales Manager requested negotiation/changes.';
-          await customerRequest.save();
-        }
-
-        if (quotation) {
-          quotation.status = 'Draft';
-          await quotation.save();
-        }
-      }
-
-      // NOTIFY CUSTOMER & SALES REP
-      const { notifyCustomerAndRepOnManagerAction } = require('../utils/notificationHelper');
-      await notifyCustomerAndRepOnManagerAction({
-        customerId: approval.customer,
-        repId: approval.salesRep,
-        title: `Sales Manager Approval Action: ${action}`,
-        message: `Sales Manager ${req.user.name || ''} evaluated request/quotation approval step to '${action}'. Note: "${reason || 'Action recorded'}"`
+      approval.auditTrail.push({
+        user: req.user._id,
+        action: 'APPROVED_BY_MANAGER',
+        role: req.user.role,
+        reason
       });
 
-    } else if (approval.currentStep === 'FINANCE_OPERATIONS') {
-      if (req.user.role !== 'FINANCE_OPERATIONS' && req.user.role !== 'ADMIN') {
-        return res.status(403).json({ message: 'Only Finance/Operations can perform this high-risk approval step' });
+      approval.currentStep = 'COMPLETED';
+
+      if (customerRequest) {
+        customerRequest.status = 'Approved_Manager';
+        customerRequest.managerComment = reason || 'Approved by Sales Manager';
+        await customerRequest.save();
+
+        const { generateQuotationFromApprovedRequest } = require('../services/quotationGenerator');
+        await generateQuotationFromApprovedRequest({
+          customerRequest,
+          approvedByUserId: req.user._id,
+          userRole: req.user.role
+        });
       }
 
-      if (action === 'APPROVE') {
-        approval.financeApproval.status = 'APPROVED';
-        approval.financeApproval.approvedBy = req.user._id;
-        approval.financeApproval.comment = reason;
-        approval.financeApproval.actionDate = new Date();
-        approval.currentStep = 'COMPLETED';
+      const Negotiation = require('../models/Negotiation');
+      let negotiation = approval.negotiation ? await Negotiation.findById(approval.negotiation) : null;
+      if (!negotiation && quotation) {
+        negotiation = await Negotiation.findOne({ quotation: quotation._id });
+      }
+      if (!negotiation && customerRequest) {
+        negotiation = await Negotiation.findOne({ customerRequest: customerRequest._id });
+      }
 
-        if (quotation) {
-          quotation.approvalChainState = 'APPROVED';
+      const effectiveMaxDisc = req.body.maxAllowedDiscount !== undefined && req.body.maxAllowedDiscount !== null 
+        ? Number(req.body.maxAllowedDiscount) 
+        : (approval.allowedDiscount || null);
+
+      if (negotiation) {
+        if (effectiveMaxDisc !== null) {
+          negotiation.managerMaxAllowedDiscount = effectiveMaxDisc;
+        }
+        if (reason) {
+          negotiation.messages.push({
+            sender: req.user._id,
+            senderRole: req.user.role,
+            message: `[Sales Manager Guidance] Authorized max discount: ${effectiveMaxDisc !== null ? effectiveMaxDisc + '%' : 'Standard Tier Limit'}. Note: ${reason}`,
+            timestamp: new Date()
+          });
+        }
+        await negotiation.save();
+      }
+
+      if (quotation) {
+        quotation.approvalChainState = 'APPROVED';
+        if (negotiation && (negotiation.status === 'Active' || negotiation.status === 'Open')) {
+          quotation.status = 'Negotiation';
+        } else {
           quotation.status = 'Approved';
-          await quotation.save();
         }
+        await quotation.save();
+      }
+    } else if (action === 'REJECT') {
+      approval.managerApproval.status = 'REJECTED';
+      approval.currentStep = 'REJECTED';
 
-        approval.auditTrail.push({
-          user: req.user._id,
-          action: 'APPROVED_BY_FINANCE',
-          role: req.user.role,
-          reason
-        });
-      } else if (action === 'REJECT') {
-        approval.financeApproval.status = 'REJECTED';
-        approval.currentStep = 'REJECTED';
+      approval.auditTrail.push({
+        user: req.user._id,
+        action: 'REJECTED',
+        role: req.user.role,
+        reason
+      });
 
-        if (quotation) {
-          quotation.approvalChainState = 'REJECTED';
-          quotation.status = 'Rejected';
-          await quotation.save();
-        }
+      if (customerRequest) {
+        customerRequest.status = 'Rejected_Manager';
+        customerRequest.managerComment = reason || 'Rejected by Sales Manager';
+        await customerRequest.save();
+      }
 
-        approval.auditTrail.push({
-          user: req.user._id,
-          action: 'REJECTED_BY_FINANCE',
-          role: req.user.role,
-          reason
-        });
+      if (quotation) {
+        quotation.approvalChainState = 'REJECTED';
+        quotation.status = 'Rejected';
+        await quotation.save();
+      }
+    } else if (action === 'RETURN_FOR_CHANGES' || action === 'REQUEST_CHANGES') {
+      approval.managerApproval.status = 'NEGOTIATION_REQUIRED';
+      approval.currentStep = 'NEGOTIATION_REQUIRED';
+
+      approval.auditTrail.push({
+        user: req.user._id,
+        action: 'RETURNED_FOR_CHANGES',
+        role: req.user.role,
+        reason
+      });
+
+      if (customerRequest) {
+        customerRequest.status = 'Negotiation_Required';
+        customerRequest.managerComment = reason || 'Sales Manager requested negotiation/changes.';
+        await customerRequest.save();
+      }
+
+      if (quotation) {
+        quotation.status = 'Draft';
+        await quotation.save();
       }
     }
 
@@ -288,4 +240,46 @@ const processApprovalAction = async (req, res) => {
   }
 };
 
-module.exports = { getApprovals, processApprovalAction };
+// @desc Record advisory financial review/opinion (SUPPORT / DO_NOT_SUPPORT / SUGGEST_CHANGES / COMMENT)
+// @route POST /api/approvals/:id/finance-opinion
+const recordFinanceOpinion = async (req, res) => {
+  try {
+    const { decision, comment = '' } = req.body;
+    const approval = await Approval.findById(req.params.id);
+
+    if (!approval) {
+      return res.status(404).json({ message: 'Approval record not found' });
+    }
+
+    if (req.user.role !== 'FINANCE_OPERATIONS' && req.user.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Only Finance/Operations role can submit financial reviews' });
+    }
+
+    approval.financeApproval = {
+      status: decision === 'SUPPORT' ? 'APPROVED' : (decision === 'DO_NOT_SUPPORT' ? 'REJECTED' : 'SUGGEST_CHANGES'),
+      approvedBy: req.user._id,
+      comment: comment || '',
+      actionDate: new Date()
+    };
+
+    approval.auditTrail.push({
+      user: req.user._id,
+      action: decision === 'SUPPORT' ? 'APPROVED_BY_FINANCE' : 'FINANCE_OPINION_ADDED',
+      role: req.user.role,
+      reason: `Finance Opinion [${decision}]: ${comment || 'Financial review recorded'}`
+    });
+
+    // Advisory review step complete; keeps current step with Sales Manager for final decision
+    approval.currentStep = 'SALES_MANAGER';
+    await approval.save();
+
+    res.json({
+      message: `Finance opinion '${decision}' recorded successfully. Returned to Sales Manager for final approval decision.`,
+      approval
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getApprovals, processApprovalAction, recordFinanceOpinion };

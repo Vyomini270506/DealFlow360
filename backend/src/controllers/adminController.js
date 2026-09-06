@@ -343,7 +343,11 @@ const getAnalytics = async (req, res) => {
       Invoice.countDocuments({ paymentStatus: { $ne: 'Paid' } }),
       Fulfillment.countDocuments({ status: 'Delivered' }),
       Backorder.countDocuments({ status: 'PENDING' }),
-      Quotation.find({ status: { $ne: 'DISCARDED' } }).populate('salesRep', 'name email').populate('assignedSalesManager', 'name email')
+      Quotation.find({ status: { $ne: 'DISCARDED' } })
+        .populate('salesRep', 'name email')
+        .populate('assignedSalesManager', 'name email')
+        .populate('customer', 'name company email tier')
+        .populate('items.product', 'name category unitPrice sku type description')
     ]);
 
     let totalPlatformRevenue = 0;

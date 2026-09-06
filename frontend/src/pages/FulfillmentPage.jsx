@@ -113,7 +113,7 @@ const FulfillmentPage = () => {
                   <tr key={bo._id} className="hover:bg-slate-800/40 transition">
                     <td className="p-3 font-semibold text-slate-200">{bo.customer?.company}</td>
                     <td className="p-3 font-mono text-indigo-400 font-bold">{bo.quotation?.quoteNumber}</td>
-                    <td className="p-3 font-bold text-white">{bo.product?.name}</td>
+                    <td className="p-3 font-bold text-white">{bo.product?.name || bo.productName || bo.product?.sku || 'Product'}</td>
                     <td className="p-3 font-bold text-rose-400">{bo.quantity} units</td>
                     <td className="p-3 text-slate-400">{new Date(bo.estimatedArrival).toLocaleDateString()}</td>
                   </tr>
