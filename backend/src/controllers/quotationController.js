@@ -40,12 +40,30 @@ const getQuotations = async (req, res) => {
 
     let quotations = await query;
 
+    const { calculateBlendedDiscountRisk } = require('../services/riskEngine');
+    for (let qDoc of quotations) {
+      const riskAnalysis = await calculateBlendedDiscountRisk({
+        items: qDoc.items,
+        customerId: qDoc.customer
+      });
+      if (qDoc.riskScore !== riskAnalysis.riskScore || qDoc.riskLevel !== riskAnalysis.riskLevel) {
+        qDoc.riskScore = riskAnalysis.riskScore;
+        qDoc.riskLevel = riskAnalysis.riskLevel;
+        qDoc.managerApprovalRequired = riskAnalysis.managerApprovalRequired;
+        qDoc.approvalRequired = riskAnalysis.approvalRequired;
+        qDoc.financeReviewRequired = riskAnalysis.financeReviewRequired;
+        qDoc.riskFactors = riskAnalysis.riskFactors;
+        qDoc.riskReasons = riskAnalysis.riskReasons;
+        await qDoc.save();
+      }
+    }
+
     if (search) {
       const s = search.toLowerCase();
       quotations = quotations.filter(q => 
         q.quoteNumber.toLowerCase().includes(s) ||
-        (q.customer && q.customer.company.toLowerCase().includes(s)) ||
-        (q.customer && q.customer.name.toLowerCase().includes(s))
+        (q.customer && q.customer.company && q.customer.company.toLowerCase().includes(s)) ||
+        (q.customer && q.customer.name && q.customer.name.toLowerCase().includes(s))
       );
     }
 
@@ -174,12 +192,10 @@ const createQuotation = async (req, res) => {
     const tax = Number((afterDiscount * 0.18).toFixed(2)); // 18% GST/Tax
     const grandTotal = Number((afterDiscount + tax).toFixed(2));
 
-    // Calculate transparent Risk Score
+    // Calculate universal Risk Score & Level
     const riskAnalysis = await calculateRiskScore({
       items: processedItems,
-      grandTotal,
-      totalBreaches,
-      isNegotiationActive: false
+      customerId: customerId
     });
 
     const quotation = new Quotation({
@@ -194,10 +210,14 @@ const createQuotation = async (req, res) => {
       tax,
       grandTotal,
       status: 'Draft',
-      riskScore: riskAnalysis.score,
-      riskLevel: riskAnalysis.level,
-      riskReasons: riskAnalysis.reasons,
-      approvalChainState: riskAnalysis.requiredApproval === 'NONE' ? 'NONE' : 'SALES_MANAGER',
+      riskScore: riskAnalysis.riskScore,
+      riskLevel: riskAnalysis.riskLevel,
+      approvalRequired: riskAnalysis.managerApprovalRequired || riskAnalysis.approvalRequired,
+      managerApprovalRequired: riskAnalysis.managerApprovalRequired || riskAnalysis.approvalRequired,
+      financeReviewRequired: riskAnalysis.financeReviewRequired,
+      riskFactors: riskAnalysis.riskFactors,
+      riskReasons: riskAnalysis.riskReasons,
+      approvalChainState: (riskAnalysis.managerApprovalRequired || riskAnalysis.approvalRequired) ? 'SALES_MANAGER' : 'NONE',
       notes
     });
 
@@ -227,18 +247,19 @@ const submitQuotation = async (req, res) => {
       return res.status(400).json({ message: 'Deal is closed & finalized by both Customer and Sales Representative. No further changes can be made.' });
     }
 
-    // Re-evaluate risk score & discount validator
-    const { totalBreaches } = await validateQuotationDiscounts(quotation.items, quotation.customer);
+    // Re-evaluate universal risk score
     const riskAnalysis = await calculateRiskScore({
       items: quotation.items,
-      grandTotal: quotation.grandTotal,
-      totalBreaches,
-      isNegotiationActive: quotation.status === 'Negotiation'
+      customerId: quotation.customer
     });
 
-    quotation.riskScore = riskAnalysis.score;
-    quotation.riskLevel = riskAnalysis.level;
-    quotation.riskReasons = riskAnalysis.reasons;
+    quotation.riskScore = riskAnalysis.riskScore;
+    quotation.riskLevel = riskAnalysis.riskLevel;
+    quotation.approvalRequired = riskAnalysis.managerApprovalRequired || riskAnalysis.approvalRequired;
+    quotation.managerApprovalRequired = riskAnalysis.managerApprovalRequired || riskAnalysis.approvalRequired;
+    quotation.financeReviewRequired = riskAnalysis.financeReviewRequired;
+    quotation.riskFactors = riskAnalysis.riskFactors;
+    quotation.riskReasons = riskAnalysis.riskReasons;
 
     // Send for Manager approval
     quotation.status = 'Pending Approval';
@@ -339,13 +360,19 @@ const acceptQuotation = async (req, res) => {
       }
     }
 
-    quotation.status = 'Confirmed';
-    quotation.approvalChainState = 'APPROVED';
-    quotation.acceptedBy = req.user._id;
-    quotation.acceptedAt = new Date();
-    await quotation.save();
+    const { finalizeClosedDeal } = require('../services/dealClosureService');
+    const result = await finalizeClosedDeal({
+      quotationId: quotation._id,
+      userId: req.user._id,
+      userRole: req.user.role
+    });
 
-    res.json({ message: 'Quotation accepted successfully!', quotation });
+    res.json({
+      message: 'Quotation accepted & deal closed successfully!',
+      quotation: result.quotation,
+      invoice: result.invoice,
+      subscriptions: result.subscriptions
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -423,6 +450,9 @@ const sendQuotation = async (req, res) => {
       await CustomerRequest.findByIdAndUpdate(quotation.customerRequest, { status: 'Quoted' });
     }
 
+    const { updateCustomerTierByOrderCount } = require('../utils/customerTierHelper');
+    await updateCustomerTierByOrderCount(quotation.customer);
+
     // NOTIFY SALES MANAGER AND CUSTOMER OF QUOTATION SENT
     const { notifyManagersForRepAction, notifyCustomerAndRepOnManagerAction } = require('../utils/notificationHelper');
     await notifyManagersForRepAction({
@@ -455,6 +485,171 @@ const discardQuotation = async (req, res) => {
   }
 };
 
+// @desc Final confirmation modal handler: Confirm & Close Deal
+// @route POST /api/quotations/:id/confirm-final
+const confirmFinalDeal = async (req, res) => {
+  try {
+    const quotation = await Quotation.findById(req.params.id)
+      .populate('customer')
+      .populate('items.product');
+
+    if (!quotation) {
+      return res.status(404).json({ message: 'Quotation not found' });
+    }
+
+    if (quotation.status === 'Closed' || quotation.status === 'CLOSED') {
+      return res.status(200).json({ message: 'Deal is already closed & finalized', quotation });
+    }
+
+    // 1. Close Quotation
+    quotation.status = 'Closed';
+    quotation.acceptedBy = req.user._id;
+    quotation.acceptedAt = new Date();
+    await quotation.save();
+
+    // 2. Close Customer Request
+    if (quotation.customerRequest) {
+      const CustomerRequest = require('../models/CustomerRequest');
+      await CustomerRequest.findByIdAndUpdate(quotation.customerRequest, { status: 'Closed' });
+    }
+
+    // 3. Close linked Negotiation
+    const Negotiation = require('../models/Negotiation');
+    await Negotiation.updateMany(
+      { quotation: quotation._id },
+      { 
+        $set: { 
+          status: 'Closed',
+          'customerConfirmation.status': 'CONFIRMED',
+          'salesRepConfirmation.status': 'CONFIRMED'
+        } 
+      }
+    );
+
+    // 4. Post-Closure Automated Workflows (Product Invoice, Subscription, Fulfillment)
+    const Product = require('../models/Product');
+    const Invoice = require('../models/Invoice');
+    const Subscription = require('../models/Subscription');
+    const { allocateFulfillmentStock } = require('../services/fulfillmentService');
+
+    let hasPhysicalProducts = false;
+    let hasRecurringServices = false;
+    const physicalItems = [];
+    const subscriptionItems = [];
+
+    for (const item of quotation.items) {
+      const prod = item.product;
+      const category = prod?.category || 'Hardware';
+
+      if (category === 'Services' || category.toLowerCase().includes('subscription') || category.toLowerCase().includes('service')) {
+        hasRecurringServices = true;
+        subscriptionItems.push(item);
+      } else {
+        hasPhysicalProducts = true;
+        physicalItems.push(item);
+      }
+    }
+
+    // Create Product Invoice & Trigger Fulfillment Allocation
+    let productInvoice = null;
+    let fulfillmentRecord = null;
+
+    if (hasPhysicalProducts || quotation.items.length > 0) {
+      fulfillmentRecord = await allocateFulfillmentStock(quotation);
+
+      const invCount = await Invoice.countDocuments();
+      const invoiceNumber = `INV-${1000 + invCount + 1}`;
+
+      const invItems = quotation.items.map(i => ({
+        product: i.product._id || i.product,
+        shippedQuantity: i.quantity,
+        unitPrice: i.finalUnitPrice || i.unitPrice,
+        lineTotal: i.lineTotal
+      }));
+
+      productInvoice = await Invoice.create({
+        invoiceNumber,
+        quotation: quotation._id,
+        fulfillment: fulfillmentRecord?._id || null,
+        customer: quotation.customer._id || quotation.customer,
+        type: 'PRODUCT',
+        items: invItems,
+        subtotal: quotation.subtotal,
+        tax: quotation.tax,
+        grandTotal: quotation.grandTotal,
+        paymentStatus: 'Unpaid',
+        dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      });
+    }
+
+    // Create Subscription if recurring service items exist
+    const createdSubscriptions = [];
+    if (hasRecurringServices) {
+      for (const sItem of subscriptionItems) {
+        const prod = sItem.product;
+        const subCount = await Subscription.countDocuments();
+        const subscriptionNumber = `SUB-${1000 + subCount + 1}`;
+
+        const sub = await Subscription.create({
+          subscriptionNumber,
+          customer: quotation.customer._id || quotation.customer,
+          product: prod._id || prod,
+          planName: prod.name || 'Recurring Service Plan',
+          billingCycle: 'Monthly',
+          amount: sItem.lineTotal,
+          status: 'Active',
+          startDate: new Date(),
+          nextBillingDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        });
+        createdSubscriptions.push(sub);
+      }
+    }
+
+    // Recalculate Customer Tier based on updated closed order count
+    const { updateCustomerTierByOrderCount } = require('../utils/customerTierHelper');
+    await updateCustomerTierByOrderCount(quotation.customer._id || quotation.customer);
+
+    res.json({
+      message: '🎉 Deal successfully CONFIRMED & CLOSED! Quotation moved to Closed Deals.',
+      quotation,
+      invoice: productInvoice,
+      fulfillment: fulfillmentRecord,
+      subscriptions: createdSubscriptions
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Get all Closed Deals for history & reporting
+// @route GET /api/quotations/closed-deals
+const getClosedDeals = async (req, res) => {
+  try {
+    let filter = { status: { $in: ['Closed', 'CLOSED'] } };
+
+    if (req.user.role === 'CUSTOMER') {
+      const userCustId = req.user.customerId?._id ? req.user.customerId._id : req.user.customerId;
+      filter.customer = userCustId;
+    } else if (req.user.role === 'SALES_REP') {
+      filter.salesRep = req.user._id;
+    } else if (req.user.role === 'SALES_MANAGER') {
+      const teamReps = await User.find({ salesManagerId: req.user._id }).select('_id');
+      filter.salesRep = { $in: teamReps.map(r => r._id) };
+    }
+
+    const closedDeals = await Quotation.find(filter)
+      .populate('customer', 'name company tier email phone')
+      .populate('salesRep', 'name email role')
+      .populate('assignedSalesManager', 'name email')
+      .populate('items.product', 'name category unitPrice sku')
+      .sort('-updatedAt');
+
+    res.json(closedDeals);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getQuotations,
   getQuotationById,
@@ -463,5 +658,8 @@ module.exports = {
   sendQuotation,
   acceptQuotation,
   rejectQuotation,
-  discardQuotation
+  discardQuotation,
+  confirmFinalDeal,
+  getClosedDeals
 };
+

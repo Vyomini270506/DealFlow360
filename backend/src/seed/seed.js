@@ -19,6 +19,8 @@ const Invoice = require('../models/Invoice');
 const Subscription = require('../models/Subscription');
 const Negotiation = require('../models/Negotiation');
 const CustomerRequest = require('../models/CustomerRequest');
+const Order = require('../models/Order');
+const { finalizeClosedDeal } = require('../services/dealClosureService');
 
 dotenv.config();
 
@@ -54,11 +56,13 @@ const seedData = async () => {
       Invoice.deleteMany({}),
       Subscription.deleteMany({}),
       Negotiation.deleteMany({}),
-      CustomerRequest.deleteMany({})
+      CustomerRequest.deleteMany({}),
+      Order.deleteMany({})
     ]);
 
     console.log('Seeding Discount Tiers & Category Limits...');
     await DiscountTier.insertMany([
+      { tier: 'Iron', maxDiscountPercentage: 3 },
       { tier: 'Bronze', maxDiscountPercentage: 5 },
       { tier: 'Silver', maxDiscountPercentage: 10 },
       { tier: 'Gold', maxDiscountPercentage: 15 }
@@ -72,11 +76,12 @@ const seedData = async () => {
 
     console.log('Seeding Products...');
     const products = await Product.insertMany([
-      { name: 'Business Laptop Pro 15', sku: 'HW-LAP-01', category: 'Hardware', unitPrice: 85000, cost: 62000, description: 'High performance Intel i7, 32GB RAM, 1TB SSD' },
-      { name: 'Enterprise Rack Server X4', sku: 'HW-SRV-04', category: 'Hardware', unitPrice: 350000, cost: 260000, description: 'Dual Xeon Silver, 128GB RAM, 4TB NVMe Raid' },
-      { name: '4K UltraWide Monitor 34"', sku: 'HW-MON-34', category: 'Hardware', unitPrice: 45000, cost: 31000, description: '34-inch Curved IPS, USB-C Docking Hub' },
-      { name: 'DealFlow Enterprise License', sku: 'SW-LIC-ENT', category: 'Software', unitPrice: 120000, cost: 20000, description: 'Annual per-user enterprise SaaS subscription' },
-      { name: 'On-Site Server Installation Service', sku: 'SV-INS-01', category: 'Services', unitPrice: 50000, cost: 25000, description: 'On-premises deployment and network wiring' }
+      { name: 'Business Laptop Pro 15', sku: 'HW-LAP-01', category: 'Hardware', type: 'ONE_TIME', billingFrequency: 'NONE', unitPrice: 85000, cost: 62000, description: 'High performance Intel i7, 32GB RAM, 1TB SSD' },
+      { name: 'Enterprise Rack Server X4', sku: 'HW-SRV-04', category: 'Hardware', type: 'ONE_TIME', billingFrequency: 'NONE', unitPrice: 350000, cost: 260000, description: 'Dual Xeon Silver, 128GB RAM, 4TB NVMe Raid' },
+      { name: '4K UltraWide Monitor 34"', sku: 'HW-MON-34', category: 'Hardware', type: 'ONE_TIME', billingFrequency: 'NONE', unitPrice: 45000, cost: 31000, description: '34-inch Curved IPS, USB-C Docking Hub' },
+      { name: 'DealFlow Enterprise SaaS License', sku: 'SW-LIC-ENT', category: 'Software', type: 'RECURRING', billingFrequency: 'ANNUALLY', unitPrice: 120000, cost: 20000, description: 'Annual per-user enterprise SaaS subscription' },
+      { name: '24/7 Priority Cloud Support SLA', sku: 'SV-INS-01', category: 'Services', type: 'RECURRING', billingFrequency: 'MONTHLY', unitPrice: 50000, cost: 25000, description: '24/7 Priority technical escalation SLA & cloud management' },
+      { name: 'Automated Threat Defense Suite', sku: 'SW-SEC-DEF', category: 'Software', type: 'RECURRING', billingFrequency: 'QUARTERLY', unitPrice: 75000, cost: 30000, description: 'Quarterly network & endpoint security monitoring software' }
     ]);
 
     console.log('Seeding 12 Exact Demo Users & Team Hierarchy...');
@@ -246,170 +251,457 @@ const seedData = async () => {
       { warehouse: warehouseAlpha._id, product: products[2]._id, stockQuantity: 40, reservedQuantity: 4 }
     ]);
 
-    console.log('Seeding Customer Product Requests (Linked to Demo Users)...');
+    console.log('Seeding Comprehensive Transactional Data & Real MongoDB Orders...');
+
+    // 1. SCENARIO 1: Closed Deal (Acme Corp - Gold Tier, Sales Rep A, Manager A)
     const req1 = await CustomerRequest.create({
       requestNumber: 'REQ-1001',
       customer: customerDocA._id,
       user: customerUserA._id,
       assignedSalesRep: salesRepA._id,
-      items: [{ product: products[0]._id, quantity: 5, desiredDiscountPercent: 4 }],
-      message: 'Need 5 Business Laptops for our engineering team.',
-      status: 'Submitted',
-      riskScore: 10,
+      items: [
+        { product: products[0]._id, quantity: 5, desiredDiscountPercent: 10 },
+        { product: products[3]._id, quantity: 1, desiredDiscountPercent: 5 }
+      ],
+      message: 'Procuring 5 Business Laptops and 1 Enterprise License for Q3 rollout.',
+      status: 'Closed',
+      riskScore: 15,
       riskLevel: 'LOW',
-      riskReasons: ['Standard discount within Gold tier limit (5%)']
+      riskReasons: ['Gold tier customer within allowable discount ceiling']
     });
 
+    const quote1 = await Quotation.create({
+      quoteNumber: 'Q-1001',
+      customerRequest: req1._id,
+      customer: customerDocA._id,
+      salesRep: salesRepA._id,
+      assignedSalesManager: salesManagerA._id,
+      items: [
+        { product: products[0]._id, quantity: 5, unitPrice: 85000, discountPercent: 10, finalUnitPrice: 76500, lineTotal: 382500, allowedDiscountPercent: 15, approvalRequired: false },
+        { product: products[3]._id, quantity: 1, unitPrice: 120000, discountPercent: 5, finalUnitPrice: 114000, lineTotal: 114000, allowedDiscountPercent: 20, approvalRequired: false }
+      ],
+      subtotal: 496500,
+      totalDiscount: 48500,
+      tax: 89370,
+      grandTotal: 585870,
+      status: 'Closed',
+      riskScore: 15,
+      riskLevel: 'LOW',
+      approvalChainState: 'APPROVED',
+      acceptedBy: customerUserA._id,
+      acceptedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)
+    });
+
+    await Negotiation.create({
+      quotation: quote1._id,
+      customerRequest: req1._id,
+      customer: customerDocA._id,
+      salesRep: salesRepA._id,
+      salesManager: salesManagerA._id,
+      status: 'Closed',
+      customerConfirmation: { status: 'CONFIRMED', confirmedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) },
+      salesRepConfirmation: { status: 'CONFIRMED', confirmedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) },
+      messages: [
+        { sender: customerUserA._id, senderRole: 'CUSTOMER', message: 'Requesting 10% discount on laptops.', timestamp: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+        { sender: salesRepA._id, senderRole: 'SALES_REP', message: 'Approved 10% discount for Gold Tier partner.', timestamp: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000) }
+      ]
+    });
+
+    // Execute automated post-closure pipeline for Quote 1 -> Generates Order, Invoice, Subscription & Fulfillment
+    const closure1 = await finalizeClosedDeal({ quotationId: quote1._id, userId: salesRepA._id, userRole: 'SALES_REP' });
+    if (closure1.invoice) {
+      closure1.invoice.paymentStatus = 'PAID';
+      closure1.invoice.amountPaid = closure1.invoice.grandTotal;
+      await closure1.invoice.save();
+    }
+
+
+    // 2. SCENARIO 2: Closed Deal with Partial Stock / Backorder (TechNova - Silver Tier, Sales Rep B, Manager A)
     const req2 = await CustomerRequest.create({
       requestNumber: 'REQ-1002',
       customer: customerDocB._id,
       user: customerUserB._id,
       assignedSalesRep: salesRepB._id,
-      items: [{ product: products[1]._id, quantity: 2, desiredDiscountPercent: 18 }],
-      message: 'Requesting 18% discount for enterprise rack servers.',
-      status: 'Escalated_Manager',
-      riskScore: 85,
-      riskLevel: 'HIGH',
-      riskReasons: ['Discount (18%) exceeds Silver tier limit (10%) by 8 points.', 'High order value'],
-      escalationReason: 'Discount exceeds baseline silver tier limit. Compulsory manager approval required.'
+      items: [
+        { product: products[2]._id, quantity: 50, desiredDiscountPercent: 8 }
+      ],
+      message: 'Bulk procurement of 50 4K UltraWide Monitors.',
+      status: 'Closed',
+      riskScore: 25,
+      riskLevel: 'LOW',
+      riskReasons: ['Bulk quantity order']
     });
 
+    const quote2 = await Quotation.create({
+      quoteNumber: 'Q-1002',
+      customerRequest: req2._id,
+      customer: customerDocB._id,
+      salesRep: salesRepB._id,
+      assignedSalesManager: salesManagerA._id,
+      items: [
+        { product: products[2]._id, quantity: 50, unitPrice: 45000, discountPercent: 8, finalUnitPrice: 41400, lineTotal: 2070000, allowedDiscountPercent: 10, approvalRequired: false }
+      ],
+      subtotal: 2070000,
+      totalDiscount: 180000,
+      tax: 372600,
+      grandTotal: 2442600,
+      status: 'Closed',
+      riskScore: 25,
+      riskLevel: 'LOW',
+      approvalChainState: 'APPROVED',
+      acceptedBy: customerUserB._id,
+      acceptedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)
+    });
+
+    const closure2 = await finalizeClosedDeal({ quotationId: quote2._id, userId: salesRepB._id, userRole: 'SALES_REP' });
+    if (closure2.invoice) {
+      closure2.invoice.paymentStatus = 'PARTIALLY_PAID';
+      closure2.invoice.amountPaid = 1200000;
+      await closure2.invoice.save();
+    }
+
+
+    // 3. SCENARIO 3: High-Risk Deal Pending Finance & Manager Review (Global Systems - Bronze Tier, Sales Rep C, Manager B)
     const req3 = await CustomerRequest.create({
       requestNumber: 'REQ-1003',
       customer: customerDocC._id,
       user: customerUserC._id,
       assignedSalesRep: salesRepC._id,
-      items: [{ product: products[2]._id, quantity: 10, desiredDiscountPercent: 12 }],
-      message: 'Bulk discount request for 10 monitors.',
+      items: [
+        { product: products[1]._id, quantity: 4, desiredDiscountPercent: 22 }
+      ],
+      message: 'High performance datacenter servers - asking 22% discount.',
       status: 'Escalated_Manager',
-      riskScore: 55,
-      riskLevel: 'MEDIUM',
-      riskReasons: ['Discount (12%) exceeds Bronze tier limit (5%) by 7 points.'],
-      escalationReason: 'Medium risk bulk order discount escalation for Sales Manager B.'
+      riskScore: 85,
+      riskLevel: 'HIGH',
+      riskReasons: ['Discount (22%) exceeds Bronze tier limit (5%) by 17 points', 'Large deal size'],
+      escalationReason: 'Discount exceeds baseline Bronze tier limit (+17%). Compulsory Manager & Finance approval required.'
     });
 
+    const quote3 = await Quotation.create({
+      quoteNumber: 'Q-1003',
+      customerRequest: req3._id,
+      customer: customerDocC._id,
+      salesRep: salesRepC._id,
+      assignedSalesManager: salesManagerB._id,
+      items: [
+        { product: products[1]._id, quantity: 4, unitPrice: 350000, discountPercent: 22, finalUnitPrice: 273000, lineTotal: 1092000, allowedDiscountPercent: 5, approvalRequired: true, breachReason: 'Discount exceeds Bronze limit by 17%' }
+      ],
+      subtotal: 1092000,
+      totalDiscount: 308000,
+      tax: 196560,
+      grandTotal: 1288560,
+      status: 'Pending Approval',
+      riskScore: 85,
+      riskLevel: 'HIGH',
+      riskReasons: ['Excess discount (+17%)', 'High overall transaction value'],
+      approvalChainState: 'FINANCE_OPERATIONS'
+    });
+
+    await Approval.create({
+      quotation: quote3._id,
+      customerRequest: req3._id,
+      customer: customerDocC._id,
+      salesRep: salesRepC._id,
+      salesManager: salesManagerB._id,
+      requestedDiscount: 22,
+      allowedDiscount: 5,
+      currentStep: 'FINANCE_OPERATIONS',
+      riskScore: 85,
+      riskLevel: 'HIGH',
+      riskReasons: ['Discount exceeds Bronze tier limit (+17%)'],
+      managerApproval: {
+        status: 'APPROVED',
+        approvedBy: salesManagerB._id,
+        approvedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+        comment: 'Sales Manager B recommends approval due to strategic expansion in Gurgaon.'
+      },
+      financeApproval: {
+        status: 'PENDING',
+        comment: 'Awaiting Finance Controller sign-off on 22% margin erosion.'
+      },
+      auditTrail: [
+        { user: salesRepC._id, action: 'SUBMITTED', role: 'SALES_REP', reason: 'Submitted high-discount request for signoff' },
+        { user: salesManagerB._id, action: 'APPROVED_BY_MANAGER', role: 'SALES_MANAGER', reason: 'Manager signoff granted, forwarded to Finance' }
+      ]
+    });
+
+
+    // 4. SCENARIO 4: Active Customer Negotiation (Urban Retail - Gold Tier, Sales Rep A, Manager A)
     const req4 = await CustomerRequest.create({
       requestNumber: 'REQ-1004',
       customer: customerDocD._id,
       user: customerUserD._id,
       assignedSalesRep: salesRepA._id,
-      items: [{ product: products[3]._id, quantity: 1, desiredDiscountPercent: 5 }],
-      message: 'Annual license renewal request.',
-      status: 'Submitted',
-      riskScore: 15,
-      riskLevel: 'LOW',
-      riskReasons: ['Low risk standard SaaS license request']
+      items: [
+        { product: products[0]._id, quantity: 10, desiredDiscountPercent: 14 },
+        { product: products[4]._id, quantity: 2, desiredDiscountPercent: 10 }
+      ],
+      message: 'POS terminal upgrade for retail outlets.',
+      status: 'Negotiation_Required',
+      riskScore: 35,
+      riskLevel: 'MEDIUM',
+      riskReasons: ['Custom service packaging request']
     });
 
-    console.log('Seeding Quotations (Linked to Demo Users)...');
-    const quote1 = await Quotation.create({
-      quoteNumber: 'Q-1001',
-      customer: customerDocA._id,
-      customerRequest: req1._id,
+    const quote4 = await Quotation.create({
+      quoteNumber: 'Q-1004',
+      customerRequest: req4._id,
+      customer: customerDocD._id,
       salesRep: salesRepA._id,
       assignedSalesManager: salesManagerA._id,
       items: [
-        { product: products[0]._id, quantity: 5, unitPrice: 85000, discountPercent: 12, finalUnitPrice: 74800, lineTotal: 374000, allowedDiscountPercent: 15, approvalRequired: false }
+        { product: products[0]._id, quantity: 10, unitPrice: 85000, discountPercent: 12, finalUnitPrice: 74800, lineTotal: 748000, allowedDiscountPercent: 15, approvalRequired: false },
+        { product: products[4]._id, quantity: 2, unitPrice: 50000, discountPercent: 10, finalUnitPrice: 45000, lineTotal: 90000, allowedDiscountPercent: 10, approvalRequired: false }
       ],
-      subtotal: 425000,
-      totalDiscount: 51000,
-      tax: 67320,
-      grandTotal: 441320,
-      status: 'Approved',
-      riskScore: 10,
-      riskLevel: 'LOW',
-      riskReasons: [],
-      approvalChainState: 'APPROVED',
-      notes: 'Initial quotation created for Acme Corp'
+      subtotal: 838000,
+      totalDiscount: 112000,
+      tax: 150840,
+      grandTotal: 988840,
+      status: 'Negotiation',
+      riskScore: 35,
+      riskLevel: 'MEDIUM',
+      approvalChainState: 'NONE'
     });
 
-    const quote2 = await Quotation.create({
-      quoteNumber: 'Q-1002',
+    await Negotiation.create({
+      quotation: quote4._id,
+      customerRequest: req4._id,
+      customer: customerDocD._id,
+      salesRep: salesRepA._id,
+      salesManager: salesManagerA._id,
+      status: 'Active',
+      customerConfirmation: { status: 'PENDING' },
+      salesRepConfirmation: { status: 'PENDING' },
+      messages: [
+        { sender: customerUserD._id, senderRole: 'CUSTOMER', message: 'Can you match 14% discount across both laptops and installation?', timestamp: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000) },
+        { sender: salesRepA._id, senderRole: 'SALES_REP', message: 'We can offer 12% on laptops and 10% on installation services with complimentary support.', timestamp: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000) }
+      ]
+    });
+
+
+    // 5. SCENARIO 5: Approved Deal Ready for Customer Acceptance (Acme Corp - Gold Tier, Sales Rep A)
+    const req5 = await CustomerRequest.create({
+      requestNumber: 'REQ-1005',
+      customer: customerDocA._id,
+      user: customerUserA._id,
+      assignedSalesRep: salesRepA._id,
+      items: [
+        { product: products[1]._id, quantity: 1, desiredDiscountPercent: 12 }
+      ],
+      message: 'Additional rack server for disaster recovery site.',
+      status: 'Submitted',
+      riskScore: 20,
+      riskLevel: 'LOW'
+    });
+
+    await Quotation.create({
+      quoteNumber: 'Q-1005',
+      customerRequest: req5._id,
+      customer: customerDocA._id,
+      salesRep: salesRepA._id,
+      assignedSalesManager: salesManagerA._id,
+      items: [
+        { product: products[1]._id, quantity: 1, unitPrice: 350000, discountPercent: 12, finalUnitPrice: 308000, lineTotal: 308000, allowedDiscountPercent: 15, approvalRequired: false }
+      ],
+      subtotal: 308000,
+      totalDiscount: 42000,
+      tax: 55440,
+      grandTotal: 363440,
+      status: 'Approved',
+      riskScore: 20,
+      riskLevel: 'LOW',
+      approvalChainState: 'APPROVED'
+    });
+
+
+    // 6. SCENARIO 6: Rejected Request (TechNova - Silver Tier, Sales Rep B, Manager A)
+    const req6 = await CustomerRequest.create({
+      requestNumber: 'REQ-1006',
       customer: customerDocB._id,
-      customerRequest: req2._id,
+      user: customerUserB._id,
+      assignedSalesRep: salesRepB._id,
+      items: [
+        { product: products[0]._id, quantity: 20, desiredDiscountPercent: 35 }
+      ],
+      message: 'Unrealistic 35% discount request for laptop fleet.',
+      status: 'Rejected_Manager',
+      riskScore: 95,
+      riskLevel: 'HIGH',
+      riskReasons: ['Discount (35%) exceeds Silver limit (10%) by 25 points']
+    });
+
+    const quote6 = await Quotation.create({
+      quoteNumber: 'Q-1006',
+      customerRequest: req6._id,
+      customer: customerDocB._id,
       salesRep: salesRepB._id,
       assignedSalesManager: salesManagerA._id,
       items: [
-        { product: products[1]._id, quantity: 2, unitPrice: 350000, discountPercent: 18, finalUnitPrice: 287000, lineTotal: 574000, allowedDiscountPercent: 10, approvalRequired: true, breachReason: 'Discount (18%) exceeds Silver limit (10%)' }
+        { product: products[0]._id, quantity: 20, unitPrice: 85000, discountPercent: 35, finalUnitPrice: 55250, lineTotal: 1105000, allowedDiscountPercent: 10, approvalRequired: true, breachReason: 'Massive discount breach' }
       ],
-      subtotal: 700000,
-      totalDiscount: 126000,
-      tax: 103320,
-      grandTotal: 677320,
-      status: 'Pending Approval',
-      riskScore: 80,
+      subtotal: 1105000,
+      totalDiscount: 595000,
+      tax: 198900,
+      grandTotal: 1303900,
+      status: 'Rejected',
+      riskScore: 95,
       riskLevel: 'HIGH',
-      riskReasons: ['Discount exceeds allowed limit (+40)', 'Large deal value (+20)'],
-      approvalChainState: 'SALES_MANAGER'
+      approvalChainState: 'REJECTED'
     });
 
-    console.log('Seeding Approvals...');
     await Approval.create({
-      quotation: quote2._id,
-      customerRequest: req2._id,
+      quotation: quote6._id,
+      customerRequest: req6._id,
       customer: customerDocB._id,
       salesRep: salesRepB._id,
       salesManager: salesManagerA._id,
-      requestedDiscount: 18,
+      requestedDiscount: 35,
       allowedDiscount: 10,
-      currentStep: 'SALES_MANAGER',
-      riskScore: 80,
+      currentStep: 'REJECTED',
+      riskScore: 95,
       riskLevel: 'HIGH',
-      riskReasons: ['Discount exceeds Silver tier limit (+40)'],
-      managerApproval: { status: 'PENDING' },
-      auditTrail: [
-        { user: salesRepB._id, action: 'SUBMITTED', role: 'SALES_REP', reason: 'Quotation submitted for manager signoff' }
-      ]
+      managerApproval: {
+        status: 'REJECTED',
+        approvedBy: salesManagerA._id,
+        approvedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+        comment: 'Rejected: Discount request exceeds maximum margin threshold.'
+      }
     });
 
-    console.log('Seeding Negotiations...');
-    await Negotiation.create({
-      quotation: quote1._id,
-      customer: customerDocA._id,
-      salesRep: salesRepA._id,
-      status: 'Open',
-      currentRequestedDiscount: 14,
-      messages: [
-        {
-          sender: customerUserA._id,
-          senderRole: 'CUSTOMER',
-          itemIndex: 0,
-          message: 'Can you provide 14% discount for 5 units of Business Laptops?',
-          counterDiscountPercent: 14,
-          timestamp: new Date(Date.now() - 3600000)
-        }
-      ]
-    });
 
-    console.log('Seeding Invoices & Subscriptions...');
-    await Invoice.create({
-      invoiceNumber: 'INV-2001',
-      quotation: quote1._id,
-      customer: customerDocA._id,
+    // 7. SCENARIO 7: Additional Closed Deal with SaaS Subscription (Urban Retail - Gold Tier, Sales Rep A)
+    const req7 = await CustomerRequest.create({
+      requestNumber: 'REQ-1007',
+      customer: customerDocD._id,
+      user: customerUserD._id,
+      assignedSalesRep: salesRepA._id,
       items: [
-        { product: products[0]._id, shippedQuantity: 5, unitPrice: 74800, lineTotal: 374000 }
+        { product: products[3]._id, quantity: 2, desiredDiscountPercent: 10 }
       ],
-      subtotal: 374000,
-      tax: 67320,
-      grandTotal: 441320,
-      paymentStatus: 'Unpaid',
-      dueDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000)
+      message: 'Subscription for 2 additional software branch licenses.',
+      status: 'Closed',
+      riskScore: 10,
+      riskLevel: 'LOW'
     });
 
-    await Subscription.create({
-      subscriptionNumber: 'SUB-3001',
-      customer: customerDocA._id,
-      product: products[3]._id,
-      planName: 'DealFlow Enterprise License - 50 Seats',
-      billingCycle: 'Yearly',
-      amount: 600000,
-      status: 'Active',
-      startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-      nextBillingDate: new Date(Date.now() + 335 * 24 * 60 * 60 * 1000)
+    const quote7 = await Quotation.create({
+      quoteNumber: 'Q-1007',
+      customerRequest: req7._id,
+      customer: customerDocD._id,
+      salesRep: salesRepA._id,
+      assignedSalesManager: salesManagerA._id,
+      items: [
+        { product: products[3]._id, quantity: 2, unitPrice: 120000, discountPercent: 10, finalUnitPrice: 108000, lineTotal: 216000, allowedDiscountPercent: 20, approvalRequired: false }
+      ],
+      subtotal: 216000,
+      totalDiscount: 24000,
+      tax: 38880,
+      grandTotal: 254880,
+      status: 'Closed',
+      riskScore: 10,
+      riskLevel: 'LOW',
+      approvalChainState: 'APPROVED',
+      acceptedBy: customerUserD._id,
+      acceptedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000)
     });
+
+    await finalizeClosedDeal({ quotationId: quote7._id, userId: salesRepA._id, userRole: 'SALES_REP' });
+
+    console.log('Seeding Varied Subscriptions Ledger...');
+    await Subscription.create([
+      {
+        subscriptionNumber: 'SUB-1001',
+        customer: customerDocA._id,
+        salesRep: salesRepA._id,
+        quotation: quote1._id,
+        product: products[3]._id,
+        planName: 'DealFlow Enterprise SaaS License',
+        billingCycle: 'Yearly',
+        billingFrequency: 'ANNUALLY',
+        amount: 114000,
+        status: 'Active',
+        startDate: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
+        nextBillingDate: new Date(Date.now() + 305 * 24 * 60 * 60 * 1000),
+        billingHistory: [
+          { invoiceNumber: 'INV-1001', date: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000), amount: 134520, status: 'PAID' }
+        ]
+      },
+      {
+        subscriptionNumber: 'SUB-1002',
+        customer: customerDocB._id,
+        salesRep: salesRepB._id,
+        quotation: quote2._id,
+        product: products[4]._id,
+        planName: '24/7 Priority Cloud Support SLA',
+        billingCycle: 'Monthly',
+        billingFrequency: 'MONTHLY',
+        amount: 50000,
+        status: 'Active',
+        startDate: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+        nextBillingDate: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000),
+        billingHistory: [
+          { invoiceNumber: 'SUB-INV-2001', date: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000), amount: 59000, status: 'PAID' },
+          { invoiceNumber: 'SUB-INV-2002', date: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000), amount: 59000, status: 'PAID' },
+          { invoiceNumber: 'SUB-INV-2003', date: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), amount: 59000, status: 'UNPAID' }
+        ]
+      },
+      {
+        subscriptionNumber: 'SUB-1003',
+        customer: customerDocC._id,
+        salesRep: salesRepC._id,
+        quotation: quote3._id,
+        product: products[5]._id,
+        planName: 'Automated Threat Defense Suite',
+        billingCycle: 'Quarterly',
+        billingFrequency: 'QUARTERLY',
+        amount: 75000,
+        status: 'Paused',
+        startDate: new Date(Date.now() - 120 * 24 * 60 * 60 * 1000),
+        nextBillingDate: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+        billingHistory: [
+          { invoiceNumber: 'SUB-INV-3001', date: new Date(Date.now() - 120 * 24 * 60 * 60 * 1000), amount: 88500, status: 'PAID' }
+        ]
+      },
+      {
+        subscriptionNumber: 'SUB-1004',
+        customer: customerDocD._id,
+        salesRep: salesRepA._id,
+        quotation: quote7._id,
+        product: products[3]._id,
+        planName: 'Retail POS Enterprise Software Suite',
+        billingCycle: 'Yearly',
+        billingFrequency: 'ANNUALLY',
+        amount: 216000,
+        status: 'Active',
+        startDate: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
+        nextBillingDate: new Date(Date.now() + 355 * 24 * 60 * 60 * 1000),
+        billingHistory: [
+          { invoiceNumber: 'SUB-INV-4001', date: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000), amount: 254880, status: 'UNPAID' }
+        ]
+      },
+      {
+        subscriptionNumber: 'SUB-1005',
+        customer: customerDocB._id,
+        salesRep: salesRepB._id,
+        product: products[4]._id,
+        planName: 'Legacy Infrastructure Maintenance Agreement',
+        billingCycle: 'Monthly',
+        billingFrequency: 'MONTHLY',
+        amount: 35000,
+        status: 'Cancelled',
+        startDate: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000),
+        endDate: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000),
+        nextBillingDate: null,
+        billingHistory: [
+          { invoiceNumber: 'SUB-INV-5001', date: new Date(Date.now() - 180 * 24 * 60 * 60 * 1000), amount: 41300, status: 'PAID' }
+        ]
+      }
+    ]);
 
     console.log('=======================================================');
-    console.log(' DealFlow360 12-Demo Users Dataset Created Successfully! ');
+    console.log(' 🎉 DealFlow360 Demo Transactional Data & Real MongoDB  ');
+    console.log('    Orders Successfully Generated Using Existing Users! ');
     console.log('=======================================================');
     return true;
   } catch (error) {

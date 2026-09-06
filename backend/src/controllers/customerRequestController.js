@@ -111,10 +111,8 @@ const createCustomerRequest = async (req, res) => {
     });
 
     const riskAnalysis = await calculateRiskScore({
-      items: tempItemsForValidator,
-      grandTotal: subtotal - totalDiscount,
-      totalBreaches,
-      isNegotiationActive: false
+      items: processedItems,
+      customerId: customerId
     });
 
     // 5. Create CustomerRequest document
@@ -126,9 +124,13 @@ const createCustomerRequest = async (req, res) => {
       items: processedItems,
       message: message || '',
       status: 'Pending',
-      riskScore: riskAnalysis.score,
-      riskLevel: riskAnalysis.level,
-      riskReasons: riskAnalysis.reasons
+      riskScore: riskAnalysis.riskScore,
+      riskLevel: riskAnalysis.riskLevel,
+      approvalRequired: riskAnalysis.managerApprovalRequired || riskAnalysis.approvalRequired,
+      managerApprovalRequired: riskAnalysis.managerApprovalRequired || riskAnalysis.approvalRequired,
+      financeReviewRequired: riskAnalysis.financeReviewRequired,
+      riskFactors: riskAnalysis.riskFactors,
+      riskReasons: riskAnalysis.riskReasons
     });
 
     await customerRequest.save();
@@ -172,6 +174,24 @@ const getCustomerRequests = async (req, res) => {
       .populate('assignedSalesRep', 'name email role phone')
       .populate('items.product', 'name category unitPrice sku')
       .sort('-createdAt');
+
+    const { calculateBlendedDiscountRisk } = require('../services/riskEngine');
+    for (let reqDoc of requests) {
+      const riskAnalysis = await calculateBlendedDiscountRisk({
+        items: reqDoc.items,
+        customerId: reqDoc.customer
+      });
+      if (reqDoc.riskScore !== riskAnalysis.riskScore || reqDoc.riskLevel !== riskAnalysis.riskLevel) {
+        reqDoc.riskScore = riskAnalysis.riskScore;
+        reqDoc.riskLevel = riskAnalysis.riskLevel;
+        reqDoc.managerApprovalRequired = riskAnalysis.managerApprovalRequired;
+        reqDoc.approvalRequired = riskAnalysis.approvalRequired;
+        reqDoc.financeReviewRequired = riskAnalysis.financeReviewRequired;
+        reqDoc.riskFactors = riskAnalysis.riskFactors;
+        reqDoc.riskReasons = riskAnalysis.riskReasons;
+        await reqDoc.save();
+      }
+    }
 
     res.json(requests);
   } catch (error) {
@@ -220,8 +240,8 @@ const repActionOnRequest = async (req, res) => {
       return res.status(404).json({ message: 'Customer request not found' });
     }
 
-    if (req.user.role === 'SALES_REP' && request.assignedSalesRep.toString() !== req.user._id.toString()) {
-      return res.status(403).json({ message: 'Not authorized to act on this request' });
+    if (req.user.role !== 'SALES_REP' || (request.assignedSalesRep && request.assignedSalesRep.toString() !== req.user._id.toString())) {
+      return res.status(403).json({ message: 'Only assigned Sales Representatives can perform rep actions on requests' });
     }
 
     if (request.status === 'Closed' || request.status === 'CLOSED') {
@@ -359,11 +379,12 @@ const sendToFinance = async (req, res) => {
       return res.status(404).json({ message: 'Customer request not found' });
     }
 
-    if (req.user.role === 'SALES_MANAGER') {
-      const repUser = await User.findById(request.assignedSalesRep);
-      if (repUser && repUser.salesManagerId && repUser.salesManagerId.toString() !== req.user._id.toString()) {
-        return res.status(403).json({ message: 'Not authorized: Request belongs to another manager\'s team' });
-      }
+    if (req.user.role !== 'SALES_MANAGER') {
+      return res.status(403).json({ message: 'Only Sales Managers can send requests to Finance/Operations' });
+    }
+    const repUser = await User.findById(request.assignedSalesRep);
+    if (repUser && repUser.salesManagerId && repUser.salesManagerId.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized: Request belongs to another manager\'s team' });
     }
 
     // IDEMPOTENCY CHECK: If already sent to Finance and status is WAITING_FOR_FINANCE
@@ -424,7 +445,7 @@ const financeAction = async (req, res) => {
       return res.status(404).json({ message: 'Customer request not found' });
     }
 
-    if (req.user.role !== 'FINANCE_OPERATIONS' && req.user.role !== 'ADMIN') {
+    if (req.user.role !== 'FINANCE_OPERATIONS') {
       return res.status(403).json({ message: 'Only Finance/Operations users can perform this action' });
     }
 
@@ -463,8 +484,12 @@ const financeAction = async (req, res) => {
 // @route POST /api/customer-requests/:id/manager-action
 const managerAction = async (req, res) => {
   try {
-    const { action, comment } = req.body; // action = 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES' | 'NEGOTIATE'
+    const { action, comment, maxAllowedDiscount } = req.body; // action = 'APPROVE' | 'REJECT' | 'REQUEST_CHANGES' | 'NEGOTIATE'
     const request = await CustomerRequest.findById(req.params.id);
+
+    if (req.user.role !== 'SALES_MANAGER') {
+      return res.status(403).json({ message: 'Only Sales Managers can perform decision actions on requests' });
+    }
 
     if (!request) {
       return res.status(404).json({ message: 'Customer request not found' });
@@ -542,6 +567,22 @@ const managerAction = async (req, res) => {
       }
     }
 
+    // Set Manager Max Allowed Discount Ceiling on linked Negotiation if passed
+    if (maxAllowedDiscount !== undefined && maxAllowedDiscount !== null && maxAllowedDiscount !== '') {
+      const Negotiation = require('../models/Negotiation');
+      let negotiation = await Negotiation.findOne({ customerRequest: request._id });
+      if (negotiation) {
+        negotiation.managerMaxAllowedDiscount = Number(maxAllowedDiscount);
+        negotiation.messages.push({
+          sender: req.user._id,
+          senderRole: req.user.role,
+          message: `[Sales Manager Guidance] Authorized max discount ceiling set to ${maxAllowedDiscount}%.`,
+          timestamp: new Date()
+        });
+        await negotiation.save();
+      }
+    }
+
     await request.save();
 
     // NOTIFY CUSTOMER & SALES REP OF MANAGER DECISION
@@ -595,6 +636,12 @@ const startNegotiationFromRequest = async (req, res) => {
       });
     }
 
+    // RULE: A negotiation can ONLY exist if a quotation/offer exists!
+    const quotation = await Quotation.findOne({ customerRequest: request._id, status: { $ne: 'DISCARDED' } });
+    if (!quotation) {
+      return res.status(400).json({ message: 'No quotation/offer exists for this request yet. Please generate a quotation before starting a negotiation.' });
+    }
+
     // Determine sales manager ID
     const repUser = await User.findById(req.user._id);
     const assignedManagerId = repUser?.salesManagerId || request.customer?.assignedSalesManager || null;
@@ -608,16 +655,17 @@ const startNegotiationFromRequest = async (req, res) => {
     }
 
     const negotiation = new Negotiation({
+      quotation: quotation._id,
       customerRequest: request._id,
-      customer: request.customer._id || request.customer,
-      salesRep: req.user._id,
+      customer: quotation.customer || request.customer._id || request.customer,
+      salesRep: quotation.salesRep || req.user._id,
       salesManager: assignedManagerId,
       status: 'Open',
       currentRequestedDiscount: maxDisc,
       messages: [{
         sender: req.user._id,
         senderRole: req.user.role,
-        message: request.managerComment ? `[Negotiation Opened by Sales Rep] Manager Note: ${request.managerComment}` : 'Negotiation opened by Sales Representative.',
+        message: request.managerComment ? `[Negotiation Opened by Sales Rep] Manager Note: ${request.managerComment}` : 'Negotiation opened by Sales Representative for quotation.',
         timestamp: new Date()
       }],
       history: [{
@@ -723,9 +771,7 @@ const createQuotationFromRequest = async (req, res) => {
 
     const riskAnalysis = await calculateRiskScore({
       items: formattedItems,
-      grandTotal,
-      totalBreaches,
-      isNegotiationActive: false
+      customerId: request.customer._id || request.customer
     });
 
     const count = await Quotation.countDocuments();
@@ -736,7 +782,7 @@ const createQuotationFromRequest = async (req, res) => {
 
     const quotation = new Quotation({
       quoteNumber,
-      customer: request.customer._id,
+      customer: request.customer._id || request.customer,
       customerRequest: request._id,
       salesRep: req.user._id,
       assignedSalesManager: assignedManagerId,
@@ -746,9 +792,13 @@ const createQuotationFromRequest = async (req, res) => {
       tax,
       grandTotal,
       status: 'Draft',
-      riskScore: riskAnalysis.score,
-      riskLevel: riskAnalysis.level,
-      riskReasons: riskAnalysis.reasons,
+      riskScore: riskAnalysis.riskScore,
+      riskLevel: riskAnalysis.riskLevel,
+      approvalRequired: riskAnalysis.managerApprovalRequired || riskAnalysis.approvalRequired,
+      managerApprovalRequired: riskAnalysis.managerApprovalRequired || riskAnalysis.approvalRequired,
+      financeReviewRequired: riskAnalysis.financeReviewRequired,
+      riskFactors: riskAnalysis.riskFactors,
+      riskReasons: riskAnalysis.riskReasons,
       approvalChainState: request.status === 'Approved_Manager' ? 'APPROVED' : 'NONE',
       notes: notes || `Created from Product Request ${request.requestNumber}`
     });
@@ -799,6 +849,105 @@ const discardCustomerRequest = async (req, res) => {
   }
 };
 
+// @desc Customer withdraws product request at any stage before closure
+// @route POST /api/customer-requests/:id/withdraw
+const withdrawCustomerRequest = async (req, res) => {
+  try {
+    const request = await CustomerRequest.findById(req.params.id);
+    if (!request) {
+      return res.status(404).json({ message: 'Customer request not found' });
+    }
+
+    if (request.status === 'Closed' || request.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Cannot withdraw a deal that is already closed and finalized.' });
+    }
+
+    // Role check: Only customer owner or assigned Rep/Manager/Admin can process withdrawal
+    if (req.user.role === 'CUSTOMER') {
+      const userCustId = req.user.customerId?._id ? req.user.customerId._id.toString() : req.user.customerId?.toString();
+      if (!userCustId || request.customer.toString() !== userCustId) {
+        return res.status(403).json({ message: 'Not authorized to withdraw this request' });
+      }
+    }
+
+    request.status = 'WITHDRAWN';
+    await request.save();
+
+    // Invalidate active negotiations linked to this request
+    const Negotiation = require('../models/Negotiation');
+    await Negotiation.updateMany(
+      { customerRequest: request._id, status: { $ne: 'Closed' } },
+      { 
+        $set: { 
+          status: 'Closed', 
+          rejectionReason: 'Customer withdrew deal' 
+        } 
+      }
+    );
+
+    // Invalidate linked quotation if any
+    if (request.quotation) {
+      const quotation = await Quotation.findById(request.quotation);
+      if (quotation && quotation.status !== 'Closed') {
+        quotation.status = 'DISCARDED';
+        await quotation.save();
+      }
+    }
+
+    res.json({ message: 'Deal/Request withdrawn successfully', request });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc Customer permanently stops pursuing a request
+// @route POST /api/customer-requests/:id/stop
+const stopCustomerRequest = async (req, res) => {
+  try {
+    const request = await CustomerRequest.findById(req.params.id);
+    if (!request) {
+      return res.status(404).json({ message: 'Customer request not found' });
+    }
+
+    if (request.status === 'Closed' || request.status === 'CLOSED') {
+      return res.status(400).json({ message: 'Cannot stop a deal that is already closed and finalized.' });
+    }
+
+    if (req.user.role === 'CUSTOMER') {
+      const userCustId = req.user.customerId?._id ? req.user.customerId._id.toString() : req.user.customerId?.toString();
+      if (!userCustId || request.customer.toString() !== userCustId) {
+        return res.status(403).json({ message: 'Not authorized to stop this request' });
+      }
+    }
+
+    request.status = 'STOPPED';
+    await request.save();
+
+    const Negotiation = require('../models/Negotiation');
+    await Negotiation.updateMany(
+      { customerRequest: request._id, status: { $ne: 'Closed' } },
+      { 
+        $set: { 
+          status: 'Closed', 
+          rejectionReason: 'Customer permanently stopped request' 
+        } 
+      }
+    );
+
+    if (request.quotation) {
+      const quotation = await Quotation.findById(request.quotation);
+      if (quotation && quotation.status !== 'Closed') {
+        quotation.status = 'DISCARDED';
+        await quotation.save();
+      }
+    }
+
+    res.json({ message: 'Request permanently stopped by customer', request });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   createCustomerRequest,
   getCustomerRequests,
@@ -810,6 +959,9 @@ module.exports = {
   managerAction,
   startNegotiationFromRequest,
   createQuotationFromRequest,
-  discardCustomerRequest
+  discardCustomerRequest,
+  withdrawCustomerRequest,
+  stopCustomerRequest
 };
+
 

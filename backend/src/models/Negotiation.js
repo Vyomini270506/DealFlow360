@@ -34,6 +34,7 @@ const negotiationSchema = new mongoose.Schema({
   },
   previousDiscount: { type: Number, default: 0 },
   currentRequestedDiscount: { type: Number, default: 0 },
+  managerMaxAllowedDiscount: { type: Number, default: null },
   rejectionReason: { type: String, default: '' },
   customerConfirmation: {
     status: { type: String, enum: ['PENDING', 'CONFIRMED', 'REJECTED'], default: 'PENDING' },

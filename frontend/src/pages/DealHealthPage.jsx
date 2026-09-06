@@ -32,7 +32,7 @@ const DealHealthPage = () => {
     value: d.grandTotal
   }));
 
-  const atRiskDeals = deals.filter(d => d.riskScore >= 60 || d.alerts?.length > 0);
+  const atRiskDeals = deals.filter(d => d.riskLevel === 'HIGH' || d.riskScore > 5 || d.alerts?.length > 0);
 
   return (
     <div className="p-6 space-y-6">

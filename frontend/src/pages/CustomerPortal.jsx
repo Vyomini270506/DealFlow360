@@ -1514,28 +1514,43 @@ const CustomerPortal = () => {
           <div className="bg-card border border-border rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
             <div>
               <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
-                <CheckCircle className="w-5 h-5 text-success" />
-                Confirm Acceptance
+                <CheckCircle className="w-5 h-5 text-emerald-500" />
+                Final Deal Confirmation
               </h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                Are you sure you want to accept quotation <strong className="text-foreground">{acceptModalQuote.quoteNumber}</strong> for <strong className="text-primary">₹{acceptModalQuote.grandTotal?.toLocaleString()}</strong>?
+              <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-semibold mt-3">
+                This is your final confirmation. Once confirmed, this deal will be closed and you will not be able to negotiate or change these terms again.
+              </div>
+              <p className="text-xs text-muted-foreground mt-3">
+                Quotation Ref: <strong className="text-foreground">{acceptModalQuote.quoteNumber}</strong> | Grand Total: <strong className="text-emerald-500 font-bold">₹{acceptModalQuote.grandTotal?.toLocaleString()}</strong>
               </p>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-border">
               <button
                 type="button"
                 onClick={() => setAcceptModalQuote(null)}
-                className="px-4 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground font-bold text-xs transition"
+                className="px-3.5 py-2 rounded-xl bg-muted text-muted-foreground hover:text-foreground font-bold text-xs transition"
               >
-                Cancel
+                Go Back
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const quoteToNegotiate = acceptModalQuote;
+                  setAcceptModalQuote(null);
+                  setSelectedQuotationForNeg(quoteToNegotiate);
+                  setIsNegotiationOpen(true);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border border-amber-500/30 font-bold text-xs transition"
+              >
+                Negotiate Again
               </button>
               <button
                 type="button"
                 onClick={handleConfirmAcceptQuotation}
-                className="px-4 py-2 rounded-xl bg-success hover:bg-emerald-600 text-white font-bold text-xs shadow transition inline-flex items-center gap-1.5"
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition inline-flex items-center gap-1.5"
               >
-                <CheckCircle className="w-3.5 h-3.5" /> Confirm Accept
+                <CheckCircle className="w-3.5 h-3.5" /> Confirm & Close Deal
               </button>
             </div>
           </div>

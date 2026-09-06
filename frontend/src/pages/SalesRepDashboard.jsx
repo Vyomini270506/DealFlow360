@@ -182,7 +182,7 @@ const SalesRepDashboard = () => {
   const closedQuotationsList = quotations.filter(q => q.status === 'Closed' || q.status === 'CLOSED');
 
   const pendingApprovalsCount = activeQuotationsList.filter(q => q.status === 'Pending Approval').length;
-  const atRiskDealsCount = activeQuotationsList.filter(q => q.riskLevel === 'HIGH' || q.riskScore >= 60).length;
+  const atRiskDealsCount = activeQuotationsList.filter(q => q.riskLevel === 'HIGH' || q.riskScore > 5).length;
   const pipelineValue = activeQuotationsList.reduce((sum, q) => sum + (q.grandTotal || 0), 0);
 
   return (
@@ -812,7 +812,7 @@ const SalesRepDashboard = () => {
                         </span>
                       ) : isLowRisk ? (
                         <button
-                          onClick={() => handleAcceptNegotiationDirectly(q._id)}
+                          onClick={() => handleOpenNegotiationDrawer(q._id)}
                           className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1.5 transition shadow"
                         >
                           <CheckCircle className="w-3.5 h-3.5" /> Accept Counter-Offer

@@ -8,9 +8,13 @@ const {
   sendQuotation,
   acceptQuotation,
   rejectQuotation,
-  discardQuotation
+  discardQuotation,
+  confirmFinalDeal,
+  getClosedDeals
 } = require('../controllers/quotationController');
 const { protect } = require('../middleware/auth');
+
+router.get('/closed-deals', protect, getClosedDeals);
 
 router.route('/')
   .get(protect, getQuotations)
@@ -22,5 +26,6 @@ router.post('/:id/send', protect, sendQuotation);
 router.post('/:id/accept', protect, acceptQuotation);
 router.post('/:id/reject', protect, rejectQuotation);
 router.post('/:id/discard', protect, discardQuotation);
+router.post('/:id/confirm-final', protect, confirmFinalDeal);
 
 module.exports = router;

@@ -11,11 +11,11 @@ const Customer = require('../models/Customer');
 const validateQuotationDiscounts = async (items, customerId) => {
   // Fetch Customer
   const customer = await Customer.findById(customerId);
-  const customerTierName = customer ? customer.tier : 'Bronze';
+  const customerTierName = customer ? customer.tier : 'Iron';
 
   // Fetch Tiers & Limits from DB (or use defaults if DB empty)
   const tierConfig = await DiscountTier.findOne({ tier: customerTierName });
-  const tierLimit = tierConfig ? tierConfig.maxDiscountPercentage : (customerTierName === 'Gold' ? 15 : customerTierName === 'Silver' ? 10 : 5);
+  const tierLimit = tierConfig ? tierConfig.maxDiscountPercentage : (customerTierName === 'Gold' ? 15 : customerTierName === 'Silver' ? 10 : customerTierName === 'Bronze' ? 5 : 3);
 
   const categoryLimits = await CategoryLimit.find();
   const categoryMap = {};

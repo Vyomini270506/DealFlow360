@@ -1,20 +1,33 @@
 const Invoice = require('../models/Invoice');
 const Fulfillment = require('../models/Fulfillment');
 const Quotation = require('../models/Quotation');
+const Customer = require('../models/Customer');
 
-// @desc Get all invoices
+// @desc Get all invoices with strict RBAC scoping
 // @route GET /api/invoices
 const getInvoices = async (req, res) => {
   try {
     let filter = {};
-    if (req.user.role === 'CUSTOMER' && req.user.customerId) {
-      filter.customer = req.user.customerId._id || req.user.customerId;
+
+    if (req.user.role === 'CUSTOMER') {
+      if (!req.user.customerId) return res.json([]);
+      const customerId = req.user.customerId._id || req.user.customerId;
+      filter.customer = customerId;
+    } else if (req.user.role === 'SALES_REP') {
+      const myCustomers = await Customer.find({ assignedSalesRepresentative: req.user._id }).select('_id');
+      const custIds = myCustomers.map(c => c._id);
+      filter.$or = [
+        { salesRep: req.user._id },
+        { customer: { $in: custIds } }
+      ];
     }
 
     const invoices = await Invoice.find(filter)
-      .populate('customer', 'name company email')
+      .populate('customer', 'name company email tier')
+      .populate('salesRep', 'name email role')
       .populate('quotation', 'quoteNumber status')
-      .populate('items.product', 'name sku category')
+      .populate('subscription', 'subscriptionNumber planName billingFrequency')
+      .populate('items.product', 'name sku category type')
       .sort('-createdAt');
 
     res.json(invoices);
@@ -29,7 +42,9 @@ const getInvoiceById = async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id)
       .populate('customer')
+      .populate('salesRep', 'name email role')
       .populate('quotation')
+      .populate('subscription')
       .populate('fulfillment')
       .populate('items.product');
 
@@ -68,10 +83,8 @@ const generateInvoice = async (req, res) => {
     const invoiceItems = [];
     let subtotal = 0;
 
-    // RULE: Only bill products that have been shipped/fulfilled (fulfilledQuantity > 0)
     for (const item of fulfillment.items) {
       if (item.fulfilledQuantity > 0) {
-        // Find matching line item price from quotation
         const quoteItem = fulfillment.quotation.items.find(
           qi => qi.product.toString() === item.product._id.toString()
         );
@@ -101,18 +114,20 @@ const generateInvoice = async (req, res) => {
       quotation: fulfillment.quotation._id,
       fulfillment: fulfillment._id,
       customer: fulfillment.customer,
+      salesRep: fulfillment.quotation.salesRep,
+      type: 'ONE_TIME',
       items: invoiceItems,
       subtotal: Number(subtotal.toFixed(2)),
       tax,
       grandTotal,
-      paymentStatus: 'Unpaid',
-      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // Net 30 days
+      paymentStatus: 'UNPAID',
+      deliveryStatus: fulfillment.status === 'Fulfilled' ? 'SHIPPED' : 'PARTIALLY_SHIPPED',
+      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       reconciliationNotes: `Partial delivery reconciliation. Billed ${invoiceItems.length} shipped items.`
     });
 
     await invoice.save();
 
-    // Update Quotation Status
     const isFullyShipped = fulfillment.status === 'Fulfilled';
     fulfillment.quotation.status = isFullyShipped ? 'Completed' : 'Fulfillment';
     await fulfillment.quotation.save();
@@ -138,9 +153,9 @@ const recordPayment = async (req, res) => {
     invoice.amountPaid = newAmountPaid;
 
     if (newAmountPaid >= invoice.grandTotal) {
-      invoice.paymentStatus = 'Paid';
+      invoice.paymentStatus = 'PAID';
     } else if (newAmountPaid > 0) {
-      invoice.paymentStatus = 'Partial';
+      invoice.paymentStatus = 'PARTIALLY_PAID';
     }
 
     await invoice.save();

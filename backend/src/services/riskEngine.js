@@ -1,86 +1,151 @@
-const Inventory = require('../models/Inventory');
+const Product = require('../models/Product');
+const Customer = require('../models/Customer');
+const DiscountTier = require('../models/DiscountTier');
+const CategoryLimit = require('../models/CategoryLimit');
 
 /**
- * Transparent rule-based risk score engine (0-100)
- * @param {Object} quotationData - Quotation details including items, grandTotal, discounts, customerNegotiation
- * @returns {Object} { score, level, reasons, approvalStep }
+ * UNIVERSAL RISK CALCULATION — ONE SOURCE OF TRUTH
+ * Blended Discount Risk Formula across ALL items in a request or quotation.
+ * 
+ * Formula:
+ * For every line:
+ *   Allowed Discount = MIN(Customer Tier Discount Limit, Product/Category Discount Limit)
+ *   Line Excess = MAX(0, Given Discount - Allowed Discount)
+ * 
+ * Risk Score = SUM(Line Excess for every quotation line)
+ * 
+ * Approval Requirements / Centralized Threshold Configuration:
+ *   Score = 0    -> Risk Level = LOW    | managerApprovalRequired: false | financeReviewRequired: false
+ *   Score 1-5    -> Risk Level = MEDIUM | managerApprovalRequired: true  | financeReviewRequired: false
+ *   Score > 5    -> Risk Level = HIGH   | managerApprovalRequired: true  | financeReviewRequired: true
+ * 
+ * @param {Object} params
+ * @param {Array} params.items - Array of items [{ product, quantity, discountPercent || desiredDiscountPercent }]
+ * @param {String|Object} params.customerId - Customer ID or customer document
+ * @returns {Promise<Object>} { riskScore, riskLevel, managerApprovalRequired, approvalRequired, financeReviewRequired, riskFactors, riskReasons }
  */
-const calculateRiskScore = async (quotationData) => {
-  let score = 0;
-  const reasons = [];
+const calculateBlendedDiscountRisk = async ({ items, customerId }) => {
+  let blendedRiskScore = 0;
+  const riskFactors = [];
+  const riskReasons = [];
+  let totalBreaches = 0;
 
-  const { items, grandTotal, totalBreaches, isNegotiationActive } = quotationData;
-
-  // 1. Discount exceeds allowed limit (+40 points)
-  if (totalBreaches > 0) {
-    score += 40;
-    reasons.push(`Discount exceeds allowed limit (+40)`);
-  }
-
-  // 2. Very high discount on any item > 25% (+20 points)
-  const maxDiscountItem = items.reduce((max, item) => Math.max(max, item.discountPercent || 0), 0);
-  if (maxDiscountItem > 25) {
-    score += 20;
-    reasons.push(`High item discount ${maxDiscountItem}% exceeds 25% (+20)`);
-  }
-
-  // 3. Large deal value > 5,000,000 / $50k (+20 points)
-  if (grandTotal > 500000) { // ₹5L+ or $50k+
-    score += 20;
-    reasons.push(`Large deal value ₹${(grandTotal / 100000).toFixed(1)}L (+20)`);
-  }
-
-  // 4. Customer negotiation active (+10 points)
-  if (isNegotiationActive) {
-    score += 10;
-    reasons.push(`Active customer negotiation (+10)`);
-  }
-
-  // 5. Stock shortage across warehouses (+10 points)
-  let stockShortageDetected = false;
-  for (const item of items) {
-    const productId = item.product._id || item.product;
-    const inventories = await Inventory.find({ product: productId });
-    const totalAvailable = inventories.reduce((sum, inv) => sum + (inv.stockQuantity - inv.reservedQuantity), 0);
-    
-    if (totalAvailable < item.quantity) {
-      stockShortageDetected = true;
-      break;
+  // 1. Determine Customer Tier from MongoDB
+  let customerTier = 'Bronze';
+  if (customerId) {
+    let custDoc = customerId;
+    if (typeof customerId === 'string' || (customerId && !customerId.tier)) {
+      custDoc = await Customer.findById(customerId);
+    }
+    if (custDoc && custDoc.tier) {
+      customerTier = custDoc.tier;
     }
   }
 
-  if (stockShortageDetected) {
-    score += 10;
-    reasons.push(`Stock shortage across warehouses (+10)`);
+  // 2. Determine Customer Tier Limit from MongoDB DiscountTier model
+  const tierDoc = await DiscountTier.findOne({ tier: customerTier });
+  const tierDefaults = { Iron: 3, Bronze: 5, Silver: 10, Gold: 15 };
+  const customerTierLimit = tierDoc ? tierDoc.maxDiscountPercentage : (tierDefaults[customerTier] || 5);
+
+  // 3. Fetch Category Limits Map from MongoDB CategoryLimit model
+  const catDocs = await CategoryLimit.find();
+  const catLimitMap = {};
+  catDocs.forEach(c => { catLimitMap[c.category] = c.maxDiscountPercentage; });
+  const catDefaults = { Hardware: 15, Services: 10, Software: 20 };
+
+  // 4. Calculate Line Excess across EVERY quotation item
+  if (items && Array.isArray(items)) {
+    for (const item of items) {
+      const prodId = item.product?._id || item.product;
+      let productDoc = (item.product && typeof item.product === 'object' && item.product.name) ? item.product : null;
+      if (!productDoc && prodId) {
+        productDoc = await Product.findById(prodId);
+      }
+
+      const prodName = productDoc?.name || 'Product';
+      const prodSku = productDoc?.sku || '';
+      const prodCategory = productDoc?.category || 'Hardware';
+
+      const categoryLimit = catLimitMap[prodCategory] !== undefined 
+        ? catLimitMap[prodCategory] 
+        : (catDefaults[prodCategory] || 15);
+
+      // Allowed Discount = MIN(Customer Tier Discount Limit, Product/Category Discount Limit)
+      const allowedDiscount = Math.min(customerTierLimit, categoryLimit);
+
+      // Given Discount
+      const givenDiscount = Number(
+        item.discountPercent !== undefined 
+          ? item.discountPercent 
+          : (item.desiredDiscountPercent !== undefined ? item.desiredDiscountPercent : 0)
+      ) || 0;
+
+      // Line Excess = MAX(0, Given Discount - Allowed Discount)
+      const excess = Math.max(0, givenDiscount - allowedDiscount);
+
+      blendedRiskScore += excess;
+
+      if (excess > 0) {
+        totalBreaches++;
+        riskFactors.push({
+          product: prodName,
+          productSku: prodSku,
+          givenDiscount,
+          allowedDiscount,
+          excess,
+          customerTierLimit,
+          categoryLimit
+        });
+        riskReasons.push(
+          `${prodName}: Given discount ${givenDiscount}% exceeds allowed limit ${allowedDiscount}% (Customer Tier ${customerTier}: ${customerTierLimit}%, Category ${prodCategory}: ${categoryLimit}%) -> Excess: ${excess}%`
+        );
+      }
+    }
   }
 
-  // Cap score at 100
-  score = Math.min(100, Math.max(0, score));
+  // Round score to 2 decimal places
+  blendedRiskScore = Number(blendedRiskScore.toFixed(2));
 
-  // Determine Risk Tier
-  let level = 'LOW';
-  if (score >= 60) {
-    level = 'HIGH';
-  } else if (score >= 30) {
-    level = 'MEDIUM';
+  // 5. Centralized Threshold Conversion
+  // Score = 0 -> No approval
+  // Score 1-5 -> Manager approval
+  // Score > 5 -> Manager + Finance review
+  let riskLevel = 'LOW';
+  let managerApprovalRequired = false;
+  let financeReviewRequired = false;
+
+  if (blendedRiskScore > 5) {
+    riskLevel = 'HIGH';
+    managerApprovalRequired = true;
+    financeReviewRequired = true;
+  } else if (blendedRiskScore > 0) {
+    riskLevel = 'MEDIUM';
+    managerApprovalRequired = true;
+    financeReviewRequired = false;
   }
 
-  // Determine Required Approval Level:
-  // HIGH risk -> requires SALES_MANAGER -> FINANCE_OPERATIONS
-  // MEDIUM or LOW risk (with breaches) -> requires SALES_MANAGER
-  let requiredApproval = 'NONE';
-  if (level === 'HIGH') {
-    requiredApproval = 'SALES_MANAGER'; // First step is Manager, then Finance
-  } else if (score > 0 || totalBreaches > 0) {
-    requiredApproval = 'SALES_MANAGER';
+  if (riskReasons.length === 0) {
+    riskReasons.push('All line discounts are within authorized customer tier and category limits.');
   }
 
   return {
-    score,
-    level,
-    reasons,
-    requiredApproval
+    riskScore: blendedRiskScore,
+    riskLevel,
+    managerApprovalRequired,
+    approvalRequired: managerApprovalRequired,
+    financeReviewRequired,
+    riskFactors,
+    riskReasons,
+    totalBreaches,
+    score: blendedRiskScore,
+    level: riskLevel,
+    reasons: riskReasons
   };
 };
 
-module.exports = { calculateRiskScore };
+const calculateRiskScore = calculateBlendedDiscountRisk;
+
+module.exports = { 
+  calculateBlendedDiscountRisk, 
+  calculateRiskScore 
+};

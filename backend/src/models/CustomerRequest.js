@@ -33,12 +33,23 @@ const customerRequestSchema = new mongoose.Schema({
       'Completed',
       'Cancelled',
       'Closed',
-      'DISCARDED'
+      'DISCARDED',
+      'PENDING',
+      'UNDER_REVIEW',
+      'NEGOTIATION',
+      'APPROVED',
+      'REJECTED',
+      'WITHDRAWN',
+      'STOPPED'
     ],
     default: 'Pending'
   },
   riskScore: { type: Number, default: 0 },
   riskLevel: { type: String, enum: ['LOW', 'MEDIUM', 'HIGH'], default: 'LOW' },
+  approvalRequired: { type: Boolean, default: false },
+  managerApprovalRequired: { type: Boolean, default: false },
+  financeReviewRequired: { type: Boolean, default: false },
+  riskFactors: [{ type: mongoose.Schema.Types.Mixed }],
   riskReasons: [{ type: String }],
   escalationReason: { type: String, default: '' },
   managerComment: { type: String, default: '' },
@@ -51,4 +62,3 @@ const customerRequestSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 module.exports = mongoose.model('CustomerRequest', customerRequestSchema);
-

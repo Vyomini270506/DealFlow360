@@ -67,6 +67,10 @@ const getReportingStats = async (req, res) => {
 // @route GET /api/analytics/deal-health
 const getDealHealthMetrics = async (req, res) => {
   try {
+    const Quotation = require('../models/Quotation');
+    const Fulfillment = require('../models/Fulfillment');
+    const DealHealth = require('../models/DealHealth');
+
     const quotations = await Quotation.find()
       .populate('customer', 'name company tier')
       .populate('salesRep', 'name email')
@@ -78,9 +82,20 @@ const getDealHealthMetrics = async (req, res) => {
       fulfillmentMap[f.quotation.toString()] = f;
     });
 
+    const dbHealthDocs = await DealHealth.find();
+    const healthDocMap = {};
+    dbHealthDocs.forEach(h => {
+      healthDocMap[h.quotation.toString()] = h;
+    });
+
     const deals = quotations.map(q => {
       const alerts = [];
       const fulfillment = fulfillmentMap[q._id.toString()];
+      const dbHealth = healthDocMap[q._id.toString()];
+
+      if (dbHealth && dbHealth.alerts && dbHealth.alerts.length > 0) {
+        dbHealth.alerts.forEach(a => alerts.push(a));
+      }
 
       // Check discount anomaly
       const maxItemDiscount = q.items.reduce((max, item) => Math.max(max, item.discountPercent || 0), 0);
@@ -116,7 +131,7 @@ const getDealHealthMetrics = async (req, res) => {
         });
       }
 
-      const healthScore = Math.max(0, 100 - (q.riskScore || 0));
+      const healthScore = dbHealth ? dbHealth.healthScore : Math.max(0, 100 - (q.riskScore || 0));
 
       return {
         _id: q._id,

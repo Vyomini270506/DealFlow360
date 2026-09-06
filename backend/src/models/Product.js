@@ -11,6 +11,16 @@ const productSchema = new mongoose.Schema({
   unitPrice: { type: Number, required: true },
   cost: { type: Number, required: true },
   description: { type: String, default: '' },
+  type: { 
+    type: String, 
+    enum: ['ONE_TIME', 'RECURRING'], 
+    default: 'ONE_TIME' 
+  },
+  billingFrequency: { 
+    type: String, 
+    enum: ['MONTHLY', 'QUARTERLY', 'ANNUALLY', 'NONE'], 
+    default: 'NONE' 
+  },
   isArchived: { type: Boolean, default: false }
 }, { timestamps: true });
 

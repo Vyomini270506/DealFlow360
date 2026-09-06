@@ -7,10 +7,17 @@ const {
   getProducts,
   createProduct,
   getPriceLists,
+  createPriceList,
   getWarehouses,
   createWarehouse,
+  getSubscriptionPlans,
+  createSubscriptionPlan,
   getUsers,
-  getCustomers
+  createUser,
+  updateUser,
+  getCustomers,
+  updateCustomerRepAssignment,
+  getAnalytics
 } = require('../controllers/adminController');
 const { protect, authorizeRoles } = require('../middleware/auth');
 
@@ -22,13 +29,25 @@ router.route('/products')
   .get(protect, getProducts)
   .post(protect, authorizeRoles('ADMIN'), createProduct);
 
-router.get('/pricelists', protect, getPriceLists);
+router.route('/pricelists')
+  .get(protect, getPriceLists)
+  .post(protect, authorizeRoles('ADMIN'), createPriceList);
 
 router.route('/warehouses')
   .get(protect, getWarehouses)
   .post(protect, authorizeRoles('ADMIN'), createWarehouse);
 
-router.get('/users', protect, authorizeRoles('ADMIN'), getUsers);
+router.route('/subscription-plans')
+  .get(protect, getSubscriptionPlans)
+  .post(protect, authorizeRoles('ADMIN'), createSubscriptionPlan);
+
+router.route('/users')
+  .get(protect, authorizeRoles('ADMIN'), getUsers)
+  .post(protect, authorizeRoles('ADMIN'), createUser);
+
+router.put('/users/:id', protect, authorizeRoles('ADMIN'), updateUser);
 router.get('/customers', protect, getCustomers);
+router.put('/customers/:id/assign-rep', protect, authorizeRoles('ADMIN'), updateCustomerRepAssignment);
+router.get('/analytics', protect, authorizeRoles('ADMIN'), getAnalytics);
 
 module.exports = router;

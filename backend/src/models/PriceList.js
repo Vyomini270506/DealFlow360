@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const priceListSchema = new mongoose.Schema({
+  name: { type: String, default: 'Standard Price List' },
   product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
   customerTier: { type: String, enum: ['Bronze', 'Silver', 'Gold'], required: true },
   salesPrice: { type: Number, required: true },

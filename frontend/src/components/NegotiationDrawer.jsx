@@ -13,6 +13,7 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
   const [counterDiscount, setCounterDiscount] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [showFinalModal, setShowFinalModal] = useState(false);
 
   const targetId = negotiationId || quotationId || customerRequestId;
 
@@ -307,7 +308,7 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
               <div className="flex items-center gap-2 pt-1">
                 {!userHasConfirmed && (
                   <button
-                    onClick={handleConfirmDealTerms}
+                    onClick={() => setShowFinalModal(true)}
                     className="flex-1 py-2.5 rounded-xl bg-[#22C55E] hover:bg-[#22C55E]/90 text-white font-bold text-xs transition flex items-center justify-center gap-2"
                   >
                     <CheckCircle2 className="w-4 h-4" /> [ Confirm & Accept Deal Terms ]
@@ -328,6 +329,50 @@ const NegotiationDrawer = ({ isOpen, negotiationId, quotationId, customerRequest
               </p>
             )}
           </div>
+
+          {/* FINAL CONFIRMATION MODAL */}
+          {showFinalModal && (
+            <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+              <div className="bg-[#111722] border border-[#242C3A] rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in fade-in zoom-in-95">
+                <div>
+                  <h3 className="text-base font-extrabold text-[#F5F7FA] flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5 text-[#22C55E]" />
+                    Final Deal Confirmation
+                  </h3>
+                  <div className="p-3.5 rounded-xl bg-[#F59E0B]/10 border border-[#F59E0B]/30 text-[#F59E0B] text-xs font-semibold mt-3">
+                    This is your final confirmation. Once confirmed, this deal will be closed and you will not be able to negotiate or change these terms again.
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-[#242C3A]">
+                  <button
+                    type="button"
+                    onClick={() => setShowFinalModal(false)}
+                    className="px-3.5 py-2 rounded-xl bg-[#161D29] text-[#A7B0C0] hover:text-[#F5F7FA] border border-[#242C3A] font-bold text-xs transition"
+                  >
+                    Go Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowFinalModal(false)}
+                    className="px-3.5 py-2 rounded-xl bg-[#F59E0B]/10 text-[#F59E0B] hover:bg-[#F59E0B]/20 border border-[#F59E0B]/30 font-bold text-xs transition"
+                  >
+                    Negotiate Again
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFinalModal(false);
+                      handleConfirmDealTerms();
+                    }}
+                    className="px-4 py-2 rounded-xl bg-[#22C55E] hover:bg-[#22C55E]/90 text-white font-bold text-xs shadow transition flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Confirm & Close Deal
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* MANAGER AUTHORIZATION CEILING CARD */}
           {negotiation?.managerMaxAllowedDiscount !== null && negotiation?.managerMaxAllowedDiscount !== undefined && (

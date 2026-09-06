@@ -9,7 +9,21 @@ const getApprovals = async (req, res) => {
   try {
     let filter = {};
 
-    if (req.user.role === 'SALES_MANAGER') {
+    if (req.query.all === 'true' || req.query.status) {
+      if (req.query.status) filter.status = req.query.status;
+      if (req.user.role === 'SALES_MANAGER') {
+        const teamReps = await User.find({ salesManagerId: req.user._id }).select('_id');
+        const repIds = teamReps.map(r => r._id);
+        filter.$or = [
+          { salesManager: req.user._id },
+          { salesRep: { $in: repIds } }
+        ];
+      } else if (req.user.role === 'FINANCE_OPERATIONS') {
+        // Finance can see high risk or finance operation approvals
+      } else if (req.user.role === 'SALES_REP') {
+        filter.salesRep = req.user._id;
+      }
+    } else if (req.user.role === 'SALES_MANAGER') {
       const teamReps = await User.find({ salesManagerId: req.user._id }).select('_id');
       const repIds = teamReps.map(r => r._id);
       
@@ -118,9 +132,43 @@ const processApprovalAction = async (req, res) => {
           await customerRequest.save();
         }
 
+        const Negotiation = require('../models/Negotiation');
+        let negotiation = approval.negotiation ? await Negotiation.findById(approval.negotiation) : null;
+        if (!negotiation && quotation) {
+          negotiation = await Negotiation.findOne({ quotation: quotation._id });
+        }
+        if (!negotiation && customerRequest) {
+          negotiation = await Negotiation.findOne({ customerRequest: customerRequest._id });
+        }
+
+        const effectiveMaxDisc = req.body.maxAllowedDiscount !== undefined && req.body.maxAllowedDiscount !== null 
+          ? Number(req.body.maxAllowedDiscount) 
+          : (approval.allowedDiscount || null);
+
+        if (negotiation) {
+          if (effectiveMaxDisc !== null) {
+            negotiation.managerMaxAllowedDiscount = effectiveMaxDisc;
+          }
+          if (reason) {
+            negotiation.messages.push({
+              sender: req.user._id,
+              senderRole: req.user.role,
+              message: `[Sales Manager Guidance] Authorized max discount: ${effectiveMaxDisc !== null ? effectiveMaxDisc + '%' : 'Standard Tier Limit'}. Note: ${reason}`,
+              timestamp: new Date()
+            });
+          }
+          await negotiation.save();
+        }
+
         if (quotation) {
           quotation.approvalChainState = 'APPROVED';
-          quotation.status = 'Approved';
+          // RULE: ACTIVE NEGOTIATION + APPROVED = INVALID STATE
+          // If negotiation is active, quotation status must remain 'Negotiation'
+          if (negotiation && (negotiation.status === 'Active' || negotiation.status === 'Open')) {
+            quotation.status = 'Negotiation';
+          } else {
+            quotation.status = 'Approved';
+          }
           await quotation.save();
         }
       } else if (action === 'REJECT') {

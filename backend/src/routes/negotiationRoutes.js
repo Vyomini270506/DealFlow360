@@ -10,7 +10,8 @@ const {
   getSalesRepNegotiations,
   reopenNegotiation,
   acceptNegotiation,
-  escalateNegotiationToManager
+  escalateNegotiationToManager,
+  withdrawNegotiation
 } = require('../controllers/negotiationController');
 const { protect, authorizeRoles } = require('../middleware/auth');
 
@@ -23,6 +24,7 @@ router.post('/quotation/:quotationId/accept', protect, acceptNegotiation);
 router.post('/quotation/:quotationId/escalate-manager', protect, escalateNegotiationToManager);
 router.get('/:id', protect, getNegotiationById);
 router.post('/:id/message', protect, addNegotiationMessageById);
+router.post('/:id/withdraw', protect, withdrawNegotiation);
 router.post('/reopen', protect, reopenNegotiation);
 
 module.exports = router;

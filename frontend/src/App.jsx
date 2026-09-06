@@ -22,6 +22,7 @@ import InvoicesPage from './pages/InvoicesPage';
 import SubscriptionsPage from './pages/SubscriptionsPage';
 import DealHealthPage from './pages/DealHealthPage';
 import ClosedDealsPage from './pages/ClosedDealsPage';
+import OrdersPage from './pages/OrdersPage';
 
 // Protected Route Guard Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
@@ -97,6 +98,7 @@ function App() {
               <Route path="/subscriptions" element={<ProtectedRoute><SubscriptionsPage /></ProtectedRoute>} />
               <Route path="/deal-health" element={<ProtectedRoute allowedRoles={['SALES_MANAGER', 'FINANCE_OPERATIONS', 'ADMIN']}><DealHealthPage /></ProtectedRoute>} />
               <Route path="/closed-deals" element={<ProtectedRoute><ClosedDealsPage /></ProtectedRoute>} />
+              <Route path="/orders" element={<ProtectedRoute><OrdersPage /></ProtectedRoute>} />
               <Route path="/negotiations" element={<ProtectedRoute><QuotationsPage /></ProtectedRoute>} />
             </Route>
 

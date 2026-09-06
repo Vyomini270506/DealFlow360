@@ -20,6 +20,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '../context/AuthContext';
 
 const RepWorkloadMonitor = ({ teamReps, requests }) => {
   const activeStatuses = ['Pending', 'Submitted', 'Processing', 'In Review', 'Escalated_Manager', 'Approved_Manager', 'Quoted'];
@@ -73,6 +74,7 @@ const RepWorkloadMonitor = ({ teamReps, requests }) => {
 };
 
 const SalesManagerDashboard = () => {
+  const { user } = useAuth();
   const [approvals, setApprovals] = useState([]);
   const [customerRequests, setCustomerRequests] = useState([]);
   const [teamReps, setTeamReps] = useState([]);
@@ -398,91 +400,96 @@ const SalesManagerDashboard = () => {
                         <Eye className="w-3.5 h-3.5 text-primary" /> View
                       </button>
 
-                      {/* HIGH RISK: Must be sent to Finance for review first if not yet reviewed */}
-                      {reqItem.riskLevel === 'HIGH' && reqItem.status !== 'FINANCE_REVIEWED' && reqItem.status !== 'Approved_Manager' && reqItem.status !== 'Quoted' && (
+                      {/* Action buttons (Hidden for ADMIN) */}
+                      {user?.role !== 'ADMIN' && (
                         <>
-                          {reqItem.status === 'WAITING_FOR_FINANCE' ? (
-                            <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
-                              Waiting for Finance Review ⏳
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => handleSendToFinance(reqItem._id)}
-                              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                            >
-                              <ShieldCheck className="w-3.5 h-3.5" /> Send to Finance (Required)
-                            </button>
+                          {/* HIGH RISK: Must be sent to Finance for review first if not yet reviewed */}
+                          {reqItem.riskLevel === 'HIGH' && reqItem.status !== 'FINANCE_REVIEWED' && reqItem.status !== 'Approved_Manager' && reqItem.status !== 'Quoted' && (
+                            <>
+                              {reqItem.status === 'WAITING_FOR_FINANCE' ? (
+                                <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30">
+                                  Waiting for Finance Review ⏳
+                                </span>
+                              ) : (
+                                <button
+                                  onClick={() => handleSendToFinance(reqItem._id)}
+                                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                                >
+                                  <ShieldCheck className="w-3.5 h-3.5" /> Send to Finance (Required)
+                                </button>
+                              )}
+                            </>
                           )}
+
+                          {/* If HIGH RISK and FINANCE REVIEWED: Display opinion and allow Manager decision */}
+                          {reqItem.riskLevel === 'HIGH' && reqItem.status === 'FINANCE_REVIEWED' && (
+                            <div className="inline-flex items-center gap-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                reqItem.financeDecision === 'SUPPORT' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-500 border border-rose-500/30'
+                              }`}>
+                                Finance Opinion: {reqItem.financeDecision}
+                              </span>
+                              <button
+                                onClick={() => handleManagerRequestAction(reqItem._id, 'APPROVE')}
+                                className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                              >
+                                <ShieldCheck className="w-3.5 h-3.5" /> Approve
+                              </button>
+                              <button
+                                onClick={() => handleManagerRequestAction(reqItem._id, 'REQUEST_CHANGES')}
+                                className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" /> Request Changes
+                              </button>
+                              <button
+                                onClick={() => handleManagerRequestAction(reqItem._id, 'REJECT')}
+                                className="px-2.5 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                              >
+                                <XCircle className="w-3.5 h-3.5" /> Reject
+                              </button>
+                            </div>
+                          )}
+
+                          {/* MEDIUM RISK & ESCALATED REQUESTS: Manager decisions */}
+                          {(reqItem.riskLevel === 'MEDIUM' || reqItem.status === 'Escalated_Manager') && (
+                            <>
+                              {reqItem.status !== 'Approved_Manager' && reqItem.status !== 'Quoted' && (
+                                <button
+                                  onClick={() => handleManagerRequestAction(reqItem._id, 'APPROVE')}
+                                  className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                                >
+                                  <ShieldCheck className="w-3.5 h-3.5" /> Approve
+                                </button>
+                              )}
+
+                              {reqItem.status !== 'Negotiation_Required' && reqItem.status !== 'Quoted' && (
+                                <button
+                                  onClick={() => handleManagerRequestAction(reqItem._id, 'REQUEST_CHANGES')}
+                                  className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" /> Request Changes
+                                </button>
+                              )}
+
+                              {reqItem.status !== 'Rejected_Manager' && reqItem.status !== 'Quoted' && (
+                                <button
+                                  onClick={() => handleManagerRequestAction(reqItem._id, 'REJECT')}
+                                  className="px-2.5 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" /> Reject
+                                </button>
+                              )}
+                            </>
+                          )}
+
+                          <button
+                            onClick={() => handleDiscardRequest(reqItem._id)}
+                            className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 font-bold text-xs inline-flex items-center gap-1 transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" /> Discard
+                          </button>
                         </>
                       )}
-
-                      {/* If HIGH RISK and FINANCE REVIEWED: Display opinion and allow Manager decision */}
-                      {reqItem.riskLevel === 'HIGH' && reqItem.status === 'FINANCE_REVIEWED' && (
-                        <div className="inline-flex items-center gap-1.5">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            reqItem.financeDecision === 'SUPPORT' ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-500 border border-rose-500/30'
-                          }`}>
-                            Finance Opinion: {reqItem.financeDecision}
-                          </span>
-                          <button
-                            onClick={() => handleManagerRequestAction(reqItem._id, 'APPROVE')}
-                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                          >
-                            <ShieldCheck className="w-3.5 h-3.5" /> Approve
-                          </button>
-                          <button
-                            onClick={() => handleManagerRequestAction(reqItem._id, 'REQUEST_CHANGES')}
-                            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" /> Request Changes
-                          </button>
-                          <button
-                            onClick={() => handleManagerRequestAction(reqItem._id, 'REJECT')}
-                            className="px-2.5 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                          >
-                            <XCircle className="w-3.5 h-3.5" /> Reject
-                          </button>
-                        </div>
-                      )}
-
-                      {/* MEDIUM RISK & ESCALATED REQUESTS: Manager decisions */}
-                      {(reqItem.riskLevel === 'MEDIUM' || reqItem.status === 'Escalated_Manager') && (
-                        <>
-                          {reqItem.status !== 'Approved_Manager' && reqItem.status !== 'Quoted' && (
-                            <button
-                              onClick={() => handleManagerRequestAction(reqItem._id, 'APPROVE')}
-                              className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                            >
-                              <ShieldCheck className="w-3.5 h-3.5" /> Approve
-                            </button>
-                          )}
-
-                          {reqItem.status !== 'Negotiation_Required' && reqItem.status !== 'Quoted' && (
-                            <button
-                              onClick={() => handleManagerRequestAction(reqItem._id, 'REQUEST_CHANGES')}
-                              className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" /> Request Changes
-                            </button>
-                          )}
-
-                          {reqItem.status !== 'Rejected_Manager' && reqItem.status !== 'Quoted' && (
-                            <button
-                              onClick={() => handleManagerRequestAction(reqItem._id, 'REJECT')}
-                              className="px-2.5 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs inline-flex items-center gap-1 shadow transition"
-                            >
-                              <XCircle className="w-3.5 h-3.5" /> Reject
-                            </button>
-                          )}
-                        </>
-                      )}
-
-                      <button
-                        onClick={() => handleDiscardRequest(reqItem._id)}
-                        className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 border border-rose-500/30 font-bold text-xs inline-flex items-center gap-1 transition"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> Discard
-                      </button>
                     </td>
                   </tr>
                 ))}
